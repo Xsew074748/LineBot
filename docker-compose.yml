@@ -1,0 +1,58 @@
+services:
+
+  # ── IT Monitor Bot ──────────────────────────────────────
+  bot:
+    build: .
+    container_name: it-monitor-bot
+    restart: always
+
+    ports:
+      - "3000:3000"
+
+    # โหลด .env จากไฟล์ (ไม่ hardcode ค่าใน compose)
+    env_file:
+      - .env
+
+    volumes:
+      # ข้อมูล Runtime — เก็บถาวรนอก container
+      - ./data:/app/data
+      # Log files
+      - ./logs:/app/logs
+      # CA cert สำหรับ Omada self-signed TLS (optional)
+      # ถ้าใช้: uncomment แล้วตั้ง OMADA_CA_CERT_PATH=/certs/omada-ca.crt ใน .env
+      # - ./certs:/certs:ro
+
+    # รอให้ network พร้อมก่อน (ไม่รอ cloudflared เพราะ bot ไม่ต้องการ)
+    depends_on: []
+
+    networks:
+      - bot-net
+
+  # ── Cloudflare Tunnel ────────────────────────────────────
+  # ทำหน้าที่แทน ngrok/cloudflared บน Windows
+  # วิธีตั้งค่า:
+  #   1. ไปที่ https://one.dash.cloudflare.com/ > Zero Trust > Tunnels
+  #   2. สร้าง Tunnel ใหม่ > เลือก Docker
+  #   3. Copy TUNNEL_TOKEN จาก command ที่ Cloudflare แสดง
+  #   4. ใส่ใน .env: CLOUDFLARE_TUNNEL_TOKEN=<token>
+  #   5. ตั้ง Tunnel Public Hostname ชี้ไป http://bot:3000
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: it-monitor-cloudflared
+    restart: always
+
+    # ใช้ token-based auth (ง่ายที่สุด ไม่ต้อง config file)
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+
+    depends_on:
+      - bot
+
+    networks:
+      - bot-net
+
+networks:
+  bot-net:
+    driver: bridge

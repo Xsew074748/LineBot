@@ -1,0 +1,27 @@
+# ── Secrets / Config จริง ────────────────────────────────
+.env
+
+# ── ข้อมูล Runtime (สร้างอัตโนมัติตอนรัน) ───────────────
+data/users.json
+data/notified_alerts.json
+
+# ── Cloudflare Tunnel credentials ────────────────────────
+*.credentials.json
+.cloudflared/
+
+# ── Dependencies ──────────────────────────────────────────
+node_modules/
+
+# ── Logs ──────────────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+
+# ── OS / Editor ───────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ── Claude Code local settings ────────────────────────────
+.claude/

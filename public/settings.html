@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IT Monitor Bot — Settings</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --navy: #1E2761; --navy-d: #151d4e; --navy-l: #2a3580;
+  --teal: #02C39A; --teal-d: #019a78; --teal-bg: #e6faf6;
+  --white: #fff; --gray-50: #f9fafb; --gray-100: #f3f4f6;
+  --gray-200: #e5e7eb; --gray-400: #9ca3af; --gray-600: #6b7280; --gray-800: #1f2937;
+  --red: #ef4444; --red-bg: #fef2f2; --green: #10b981; --green-bg: #ecfdf5;
+  --yellow-bg: #fffbeb; --yellow-border: #fde68a; --yellow-text: #92400e;
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+body { font-family: var(--font); background: var(--gray-100); color: var(--gray-800); }
+
+header {
+  background: linear-gradient(135deg, var(--navy-d), var(--navy));
+  color: var(--white); padding: 0 24px; height: 60px;
+  display: flex; align-items: center; justify-content: space-between;
+  box-shadow: 0 2px 8px rgba(0,0,0,.25); position: sticky; top: 0; z-index: 100;
+}
+header h1 { font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+.header-actions { display: flex; gap: 10px; }
+.btn-ghost {
+  background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.3);
+  color: var(--white); padding: 6px 14px; border-radius: 6px; font-size: 13px;
+  cursor: pointer; text-decoration: none; display: inline-block; transition: background .2s;
+}
+.btn-ghost:hover { background: rgba(255,255,255,.25); }
+
+.page { max-width: 760px; margin: 0 auto; padding: 28px 20px 60px; }
+
+/* ── Section ── */
+.section { margin-bottom: 24px; }
+.section-header {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 15px; font-weight: 700; color: var(--navy);
+  margin-bottom: 12px; padding-bottom: 10px;
+  border-bottom: 2px solid var(--teal);
+}
+.card {
+  background: var(--white); border-radius: 12px; padding: 20px 24px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+
+/* ── Field ── */
+.field { margin-bottom: 18px; }
+.field:last-child { margin-bottom: 0; }
+.field-label {
+  font-size: 12px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .5px; color: var(--gray-400); margin-bottom: 6px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.field-row { display: flex; gap: 8px; align-items: stretch; }
+.field-row input {
+  flex: 1; padding: 10px 13px; border: 1.5px solid var(--gray-200);
+  border-radius: 8px; font-size: 14px; font-family: var(--font);
+  outline: none; transition: border-color .2s;
+  background: var(--gray-50); color: var(--gray-800);
+}
+.field-row input:focus { border-color: var(--teal); background: var(--white); box-shadow: 0 0 0 3px rgba(2,195,154,.1); }
+.field-row input.locked { color: var(--gray-400); font-family: monospace; }
+.btn-icon {
+  padding: 0 12px; border-radius: 8px; border: 1.5px solid var(--gray-200);
+  background: var(--white); cursor: pointer; font-size: 16px;
+  transition: all .15s; color: var(--gray-600); display: flex; align-items: center;
+}
+.btn-icon:hover { background: var(--gray-100); border-color: var(--gray-400); }
+.field-hint { font-size: 12px; color: var(--gray-400); margin-top: 5px; }
+
+/* ── Inline toggle ── */
+.field-toggle { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+.switch { position: relative; width: 40px; height: 22px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider {
+  position: absolute; inset: 0; background: var(--gray-200); border-radius: 22px;
+  cursor: pointer; transition: background .2s;
+}
+.slider::before {
+  content: ''; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px;
+  background: var(--white); border-radius: 50%; transition: transform .2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,.2);
+}
+.switch input:checked + .slider { background: var(--teal); }
+.switch input:checked + .slider::before { transform: translateX(18px); }
+.toggle-label { font-size: 14px; font-weight: 600; }
+
+/* ── Test button ── */
+.test-row { display: flex; gap: 8px; align-items: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--gray-200); }
+.btn-test {
+  padding: 8px 16px; background: var(--navy); color: var(--white); border: none;
+  border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: background .2s; white-space: nowrap;
+}
+.btn-test:hover { background: var(--navy-l); }
+.btn-test:disabled { opacity: .5; cursor: not-allowed; }
+.test-badge { font-size: 13px; font-weight: 500; display: none; }
+.test-badge.ok  { display: inline; color: var(--green); }
+.test-badge.err { display: inline; color: var(--red); }
+
+/* ── Save bar ── */
+.save-bar {
+  background: var(--white); border-top: 2px solid var(--gray-200);
+  position: sticky; bottom: 0; padding: 16px 20px;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  box-shadow: 0 -4px 12px rgba(0,0,0,.07);
+}
+.save-hint { font-size: 13px; color: var(--gray-600); }
+.btn-save {
+  padding: 12px 28px; background: var(--teal); color: var(--white); border: none;
+  border-radius: 8px; font-size: 15px; font-weight: 700; cursor: pointer;
+  transition: all .2s; min-width: 160px;
+}
+.btn-save:hover { background: var(--teal-d); }
+.btn-save:active { transform: scale(.98); }
+.btn-save:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ── Alerts ── */
+.alert {
+  padding: 12px 16px; border-radius: 10px; font-size: 14px;
+  margin-bottom: 16px; line-height: 1.5; display: none;
+}
+.alert.ok  { display: block; background: var(--green-bg); color: var(--green); border: 1px solid #a7f3d0; }
+.alert.err { display: block; background: var(--red-bg);   color: var(--red);   border: 1px solid #fca5a5; }
+.alert.warn { display: block; background: var(--yellow-bg); color: var(--yellow-text); border: 1px solid var(--yellow-border); }
+
+@media (max-width: 600px) {
+  .page { padding: 16px 12px 80px; }
+  .save-bar { flex-direction: column; gap: 10px; }
+  .btn-save { width: 100%; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🤖 IT Monitor Bot — Settings</h1>
+  <div class="header-actions">
+    <a href="/setup/wizard" class="btn-ghost">🧙 Wizard</a>
+    <a href="/setup/logout" class="btn-ghost">ออกจากระบบ</a>
+  </div>
+</header>
+
+<div class="page">
+  <div id="topAlert" class="alert"></div>
+
+  <!-- LINE -->
+  <div class="section">
+    <div class="section-header">📱 LINE Messaging API</div>
+    <div class="card">
+      <div class="field">
+        <div class="field-label">Channel Secret</div>
+        <div class="field-row">
+          <input type="password" id="lineChannelSecret" class="locked" placeholder="ยังไม่ได้ตั้งค่า" readonly>
+          <button class="btn-icon" onclick="editField('lineChannelSecret')" title="แก้ไข">✏️</button>
+          <button class="btn-icon" onclick="toggleVis('lineChannelSecret')" title="แสดง/ซ่อน">👁</button>
+        </div>
+      </div>
+      <div class="field">
+        <div class="field-label">Channel Access Token</div>
+        <div class="field-row">
+          <input type="password" id="lineChannelAccessToken" class="locked" placeholder="ยังไม่ได้ตั้งค่า" readonly>
+          <button class="btn-icon" onclick="editField('lineChannelAccessToken')" title="แก้ไข">✏️</button>
+          <button class="btn-icon" onclick="toggleVis('lineChannelAccessToken')" title="แสดง/ซ่อน">👁</button>
+        </div>
+      </div>
+      <div class="test-row">
+        <button class="btn-test" onclick="testSvc('line')">🔗 ทดสอบ LINE</button>
+        <span class="test-badge" id="line-badge"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Zabbix -->
+  <div class="section">
+    <div class="section-header">🔌 Zabbix Monitoring</div>
+    <div class="card">
+      <div class="field">
+        <div class="field-label">URL</div>
+        <div class="field-row">
+          <input type="text" id="zabbixUrl" placeholder="https://zabbix.example.com">
+        </div>
+      </div>
+      <div class="field">
+        <div class="field-label">API Token</div>
+        <div class="field-row">
+          <input type="password" id="zabbixApiToken" class="locked" placeholder="ยังไม่ได้ตั้งค่า" readonly>
+          <button class="btn-icon" onclick="editField('zabbixApiToken')" title="แก้ไข">✏️</button>
+          <button class="btn-icon" onclick="toggleVis('zabbixApiToken')" title="แสดง/ซ่อน">👁</button>
+        </div>
+      </div>
+      <div class="test-row">
+        <button class="btn-test" onclick="testSvc('zabbix')">🔗 ทดสอบ Zabbix</button>
+        <span class="test-badge" id="zabbix-badge"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Omada -->
+  <div class="section">
+    <div class="section-header">📡 Omada WiFi Controller</div>
+    <div class="card">
+      <div class="field-toggle">
+        <label class="switch"><input type="checkbox" id="omadaEnabled"><span class="slider"></span></label>
+        <span class="toggle-label">เปิดใช้งาน Omada</span>
+      </div>
+      <div class="field">
+        <div class="field-label">URL</div>
+        <div class="field-row">
+          <input type="text" id="omadaUrl" placeholder="https://omada.example.com:8043">
+        </div>
+      </div>
+      <div class="field">
+        <div class="field-label">Username</div>
+        <div class="field-row">
+          <input type="text" id="omadaUsername" placeholder="admin">
+        </div>
+      </div>
+      <div class="field">
+        <div class="field-label">Password</div>
+        <div class="field-row">
+          <input type="password" id="omadaPassword" class="locked" placeholder="ยังไม่ได้ตั้งค่า" readonly>
+          <button class="btn-icon" onclick="editField('omadaPassword')" title="แก้ไข">✏️</button>
+          <button class="btn-icon" onclick="toggleVis('omadaPassword')" title="แสดง/ซ่อน">👁</button>
+        </div>
+      </div>
+      <div class="field">
+        <div class="field-label">Site ID</div>
+        <div class="field-row">
+          <input type="text" id="omadaSiteId" placeholder="default">
+        </div>
+      </div>
+      <div class="test-row">
+        <button class="btn-test" onclick="testSvc('omada')">🔗 ทดสอบ Omada</button>
+        <span class="test-badge" id="omada-badge"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- HikCentral -->
+  <div class="section">
+    <div class="section-header">📹 HikCentral CCTV</div>
+    <div class="card">
+      <div class="field-toggle">
+        <label class="switch"><input type="checkbox" id="hikcentralEnabled"><span class="slider"></span></label>
+        <span class="toggle-label">เปิดใช้งาน HikCentral</span>
+      </div>
+      <div class="field">
+        <div class="field-label">URL</div>
+        <div class="field-row">
+          <input type="text" id="hikcentralUrl" placeholder="http://hikcentral.example.com">
+        </div>
+      </div>
+      <div class="field">
+        <div class="field-label">Client ID</div>
+        <div class="field-row">
+          <input type="text" id="hikcentralClientId" placeholder="Client ID">
+        </div>
+      </div>
+      <div class="field">
+        <div class="field-label">Client Secret</div>
+        <div class="field-row">
+          <input type="password" id="hikcentralClientSecret" class="locked" placeholder="ยังไม่ได้ตั้งค่า" readonly>
+          <button class="btn-icon" onclick="editField('hikcentralClientSecret')" title="แก้ไข">✏️</button>
+          <button class="btn-icon" onclick="toggleVis('hikcentralClientSecret')" title="แสดง/ซ่อน">👁</button>
+        </div>
+      </div>
+      <div class="test-row">
+        <button class="btn-test" onclick="testSvc('hikcentral')">🔗 ทดสอบ HikCentral</button>
+        <span class="test-badge" id="hikcentral-badge"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Claude AI -->
+  <div class="section">
+    <div class="section-header">🤖 Claude AI</div>
+    <div class="card">
+      <div class="field">
+        <div class="field-label">Anthropic API Key</div>
+        <div class="field-row">
+          <input type="password" id="claudeApiKey" class="locked" placeholder="ยังไม่ได้ตั้งค่า" readonly>
+          <button class="btn-icon" onclick="editField('claudeApiKey')" title="แก้ไข">✏️</button>
+          <button class="btn-icon" onclick="toggleVis('claudeApiKey')" title="แสดง/ซ่อน">👁</button>
+        </div>
+      </div>
+      <div class="test-row">
+        <button class="btn-test" onclick="testSvc('claude')">🔗 ทดสอบ Claude API</button>
+        <span class="test-badge" id="claude-badge"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Security -->
+  <div class="section">
+    <div class="section-header">🔒 Security</div>
+    <div class="card">
+      <div class="field">
+        <div class="field-label">รหัสผ่าน Setup ใหม่ <span style="font-weight:400;text-transform:none;letter-spacing:0">(เว้นไว้ถ้าไม่ต้องการเปลี่ยน)</span></div>
+        <div class="field-row">
+          <input type="password" id="setupPassword" placeholder="อย่างน้อย 4 ตัวอักษร">
+          <button class="btn-icon" onclick="toggleVis('setupPassword')" title="แสดง/ซ่อน">👁</button>
+        </div>
+        <div class="field-hint">รหัสเริ่มต้น: admin — เปลี่ยนได้เมื่อต้องการเพิ่มความปลอดภัย</div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /page -->
+
+<!-- Save bar -->
+<div class="save-bar">
+  <span class="save-hint" id="saveHint">⚠️ ต้อง Restart Bot หลังบันทึก เพื่อให้ค่าใหม่มีผล</span>
+  <button class="btn-save" id="saveBtn" onclick="saveAll()">💾 บันทึกการตั้งค่า</button>
+</div>
+
+<script>
+// Track which fields have been unlocked for editing
+const editedFields = new Set();
+
+// ── Load current config ────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', loadConfig);
+
+async function loadConfig() {
+  try {
+    const r = await fetch('/api/config/current');
+    const d = await r.json();
+    // Plain text fields
+    setVal('zabbixUrl',          d.zabbix?.url || '');
+    setVal('omadaUrl',           d.omada?.url  || '');
+    setVal('omadaUsername',      d.omada?.username || '');
+    setVal('omadaSiteId',        d.omada?.siteId   || '');
+    setVal('hikcentralUrl',      d.hikcentral?.url      || '');
+    setVal('hikcentralClientId', d.hikcentral?.clientId || '');
+    // Toggle states
+    setChecked('omadaEnabled',      d.omada?.enabled      || false);
+    setChecked('hikcentralEnabled', d.hikcentral?.enabled || false);
+    // Masked fields — show masked value in locked input
+    setMasked('lineChannelSecret',      d.line?.channelSecret);
+    setMasked('lineChannelAccessToken', d.line?.channelAccessToken);
+    setMasked('zabbixApiToken',         d.zabbix?.apiToken);
+    setMasked('omadaPassword',          d.omada?.password);
+    setMasked('hikcentralClientSecret', d.hikcentral?.clientSecret);
+    setMasked('claudeApiKey',           d.claude?.apiKey);
+  } catch(e) {
+    showAlert('topAlert', 'warn', '⚠️ ไม่สามารถโหลดค่าปัจจุบันได้: ' + e.message);
+  }
+}
+
+function setVal(id, v) { const el = document.getElementById(id); if (el) el.value = v; }
+function setChecked(id, v) { const el = document.getElementById(id); if (el) el.checked = !!v; }
+function getVal(id) { return (document.getElementById(id)?.value || '').trim(); }
+
+function setMasked(id, info) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (info?.set) {
+    el.value = info.masked || '••••••••••••';
+    el.classList.add('locked');
+    el.readOnly = true;
+  } else {
+    el.value = '';
+    el.placeholder = 'ยังไม่ได้ตั้งค่า';
+    el.readOnly = false;
+    el.classList.remove('locked');
+  }
+}
+
+// ── Edit locked field ──────────────────────────────────────────────────────
+function editField(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.value = '';
+  el.type = 'text';
+  el.readOnly = false;
+  el.classList.remove('locked');
+  el.placeholder = 'กรอกค่าใหม่';
+  el.focus();
+  editedFields.add(id);
+}
+
+// ── Show/hide password ─────────────────────────────────────────────────────
+function toggleVis(id) {
+  const el = document.getElementById(id);
+  if (el && !el.readOnly) el.type = el.type === 'password' ? 'text' : 'password';
+}
+
+// ── Test service ───────────────────────────────────────────────────────────
+async function testSvc(svc) {
+  const badge = document.getElementById(svc + '-badge');
+  badge.className = 'test-badge';
+  badge.textContent = '⏳ กำลังทดสอบ...';
+  badge.style.display = 'inline';
+
+  const body = buildTestPayload(svc);
+  try {
+    const r = await fetch('/api/config/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ service: svc, ...body }),
+    });
+    const d = await r.json();
+    badge.className = 'test-badge ' + (d.ok ? 'ok' : 'err');
+    badge.textContent = d.message || (d.ok ? '✅ สำเร็จ' : '❌ ล้มเหลว');
+  } catch(e) {
+    badge.className = 'test-badge err';
+    badge.textContent = '❌ ' + e.message;
+  }
+}
+
+function buildTestPayload(svc) {
+  // For locked (unedited) fields, send empty string — backend will use .env value
+  const unlocked = id => editedFields.has(id) ? getVal(id) : '';
+  return {
+    line:       { channelAccessToken: unlocked('lineChannelAccessToken') },
+    zabbix:     { url: getVal('zabbixUrl'), apiToken: unlocked('zabbixApiToken') },
+    omada:      { url: getVal('omadaUrl'), username: getVal('omadaUsername'), password: unlocked('omadaPassword') },
+    hikcentral: { url: getVal('hikcentralUrl'), clientId: getVal('hikcentralClientId'), clientSecret: unlocked('hikcentralClientSecret') },
+    claude:     { apiKey: unlocked('claudeApiKey') },
+  }[svc] || {};
+}
+
+// ── Save all ───────────────────────────────────────────────────────────────
+async function saveAll() {
+  const btn = document.getElementById('saveBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ กำลังบันทึก...';
+
+  // Only send values for fields that were actually edited or are plain text
+  const payload = {
+    lineChannelSecret:      editedFields.has('lineChannelSecret')      ? getVal('lineChannelSecret')      : '',
+    lineChannelAccessToken: editedFields.has('lineChannelAccessToken') ? getVal('lineChannelAccessToken') : '',
+    zabbixUrl:              getVal('zabbixUrl'),
+    zabbixApiToken:         editedFields.has('zabbixApiToken')         ? getVal('zabbixApiToken')         : '',
+    omadaEnabled:           document.getElementById('omadaEnabled')?.checked,
+    omadaUrl:               getVal('omadaUrl'),
+    omadaUsername:          getVal('omadaUsername'),
+    omadaPassword:          editedFields.has('omadaPassword')          ? getVal('omadaPassword')          : '',
+    omadaSiteId:            getVal('omadaSiteId'),
+    hikcentralEnabled:      document.getElementById('hikcentralEnabled')?.checked,
+    hikcentralUrl:          getVal('hikcentralUrl'),
+    hikcentralClientId:     getVal('hikcentralClientId'),
+    hikcentralClientSecret: editedFields.has('hikcentralClientSecret') ? getVal('hikcentralClientSecret') : '',
+    claudeApiKey:           editedFields.has('claudeApiKey')           ? getVal('claudeApiKey')           : '',
+    setupPassword:          getVal('setupPassword'),
+  };
+
+  try {
+    const r = await fetch('/api/config/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    showAlert('topAlert', d.ok ? 'ok' : 'err', d.message || d.error);
+    if (d.ok) {
+      editedFields.clear();
+      document.getElementById('setupPassword').value = '';
+      window.scrollTo(0, 0);
+    }
+  } catch(e) {
+    showAlert('topAlert', 'err', '❌ ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '💾 บันทึกการตั้งค่า';
+  }
+}
+
+function showAlert(id, type, msg) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className = 'alert ' + type;
+  el.textContent = msg;
+  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+</script>
+</body>
+</html>

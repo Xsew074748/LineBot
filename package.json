@@ -1,0 +1,25 @@
+{
+  "name": "it-monitor-bot",
+  "version": "1.0.0",
+  "description": "IT Monitor LINE Bot - Zabbix, Omada, HikCentral + Claude AI",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "test": "jest --verbose"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.36.3",
+    "@line/bot-sdk": "^9.4.0",
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

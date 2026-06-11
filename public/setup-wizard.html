@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IT Monitor Bot — Setup Wizard</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --navy: #1E2761; --navy-d: #151d4e; --navy-l: #2a3580;
+  --teal: #02C39A; --teal-d: #019a78; --teal-bg: #e6faf6;
+  --white: #fff; --gray-50: #f9fafb; --gray-100: #f3f4f6;
+  --gray-200: #e5e7eb; --gray-400: #9ca3af; --gray-600: #6b7280; --gray-800: #1f2937;
+  --red: #ef4444; --red-bg: #fef2f2; --green: #10b981; --green-bg: #ecfdf5;
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+body { font-family: var(--font); background: var(--gray-100); color: var(--gray-800); }
+
+/* ── Layout ── */
+.app { display: flex; min-height: 100vh; flex-direction: column; }
+header {
+  background: linear-gradient(135deg, var(--navy-d), var(--navy));
+  color: var(--white); padding: 0 24px; height: 60px;
+  display: flex; align-items: center; justify-content: space-between;
+  box-shadow: 0 2px 8px rgba(0,0,0,.25); position: sticky; top: 0; z-index: 100;
+}
+header h1 { font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+header .actions { display: flex; gap: 10px; }
+.btn-ghost {
+  background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.3);
+  color: var(--white); padding: 6px 14px; border-radius: 6px; font-size: 13px;
+  cursor: pointer; text-decoration: none; display: inline-block;
+  transition: background .2s;
+}
+.btn-ghost:hover { background: rgba(255,255,255,.25); }
+
+.main { display: flex; flex: 1; }
+
+/* ── Sidebar ── */
+.sidebar {
+  width: 220px; background: var(--navy); color: var(--white);
+  padding: 28px 0; flex-shrink: 0;
+}
+.sidebar-title { font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+  opacity: .5; padding: 0 20px 12px; }
+.step-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 20px; cursor: pointer; transition: background .15s;
+  font-size: 14px; position: relative;
+}
+.step-item:hover { background: rgba(255,255,255,.08); }
+.step-item.active { background: rgba(2,195,154,.15); }
+.step-item.active::left { content:''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--teal); }
+.step-num {
+  width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; flex-shrink: 0;
+  background: rgba(255,255,255,.1); border: 1.5px solid rgba(255,255,255,.2);
+  transition: all .2s;
+}
+.step-item.done .step-num { background: var(--teal); border-color: var(--teal); }
+.step-item.active .step-num { background: var(--teal); border-color: var(--teal); box-shadow: 0 0 0 4px rgba(2,195,154,.25); }
+.step-label { font-size: 13px; opacity: .85; }
+.step-item.active .step-label { opacity: 1; font-weight: 600; color: var(--teal); }
+.step-item.done .step-label { opacity: .7; }
+
+/* ── Content ── */
+.content { flex: 1; padding: 32px; overflow-y: auto; max-width: 700px; }
+.step-panel { display: none; }
+.step-panel.active { display: block; }
+.panel-title { font-size: 22px; font-weight: 700; color: var(--navy); margin-bottom: 6px; }
+.panel-subtitle { font-size: 14px; color: var(--gray-600); margin-bottom: 28px; }
+
+.card { background: var(--white); border-radius: 12px; padding: 24px; box-shadow: 0 1px 4px rgba(0,0,0,.08); margin-bottom: 16px; }
+
+/* ── Form ── */
+.field { margin-bottom: 20px; }
+.field:last-child { margin-bottom: 0; }
+.field label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-800); margin-bottom: 5px; }
+.field label .req { color: var(--red); margin-left: 3px; }
+.field label .opt { color: var(--gray-400); font-weight: 400; font-size: 11px; margin-left: 6px; }
+.field-hint { font-size: 12px; color: var(--gray-600); margin-top: 5px; line-height: 1.5; }
+.input-wrap { position: relative; }
+.input-wrap input {
+  width: 100%; padding: 10px 40px 10px 13px; border: 1.5px solid var(--gray-200);
+  border-radius: 8px; font-size: 14px; font-family: var(--font); outline: none;
+  transition: border-color .2s, box-shadow .2s; background: var(--white);
+}
+.input-wrap input:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(2,195,154,.12); }
+.input-wrap input.error { border-color: var(--red); }
+.toggle-vis {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; cursor: pointer; color: var(--gray-400);
+  font-size: 16px; padding: 4px; line-height: 1;
+}
+.toggle-vis:hover { color: var(--gray-600); }
+
+.switch-wrap { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.switch { position: relative; width: 44px; height: 24px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider {
+  position: absolute; inset: 0; background: var(--gray-200); border-radius: 24px;
+  cursor: pointer; transition: background .2s;
+}
+.slider::before {
+  content: ''; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px;
+  background: var(--white); border-radius: 50%; transition: transform .2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,.2);
+}
+.switch input:checked + .slider { background: var(--teal); }
+.switch input:checked + .slider::before { transform: translateX(20px); }
+.switch-label { font-size: 14px; font-weight: 600; }
+.optional-fields { display: none; }
+.optional-fields.show { display: block; }
+
+/* ── Test button & result ── */
+.test-row { display: flex; gap: 10px; align-items: flex-start; margin-top: 16px; }
+.btn-test {
+  padding: 9px 18px; background: var(--navy); color: var(--white); border: none;
+  border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  transition: background .2s; display: flex; align-items: center; gap: 6px;
+}
+.btn-test:hover { background: var(--navy-l); }
+.btn-test:disabled { opacity: .5; cursor: not-allowed; }
+.test-result {
+  flex: 1; font-size: 13px; padding: 9px 13px; border-radius: 8px; display: none; line-height: 1.4;
+}
+.test-result.ok  { display: block; background: var(--green-bg); color: var(--green); }
+.test-result.err { display: block; background: var(--red-bg); color: var(--red); }
+
+/* ── Navigation ── */
+.nav-row { display: flex; justify-content: space-between; align-items: center; margin-top: 24px; }
+.btn-nav {
+  padding: 11px 24px; border-radius: 8px; font-size: 15px; font-weight: 600;
+  cursor: pointer; border: none; display: flex; align-items: center; gap: 6px; transition: all .2s;
+}
+.btn-prev { background: var(--gray-100); color: var(--gray-600); }
+.btn-prev:hover { background: var(--gray-200); }
+.btn-next { background: var(--teal); color: var(--white); margin-left: auto; }
+.btn-next:hover { background: var(--teal-d); }
+.btn-next:active { transform: scale(.98); }
+.btn-save { background: var(--teal); color: var(--white); }
+.btn-save:hover { background: var(--teal-d); }
+
+/* ── Summary ── */
+.summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.summary-card {
+  background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: 10px; padding: 14px;
+}
+.summary-card .sc-label { font-size: 11px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase;
+  color: var(--gray-400); margin-bottom: 6px; }
+.summary-card .sc-status { font-size: 14px; font-weight: 600; }
+.sc-ok { color: var(--green); }
+.sc-warn { color: var(--gray-600); }
+.sc-err { color: var(--red); }
+
+.save-result {
+  padding: 14px; border-radius: 10px; font-size: 14px; font-weight: 600; display: none; margin-top: 16px;
+  line-height: 1.5;
+}
+.save-result.ok  { display: block; background: var(--green-bg); color: var(--green); border: 1px solid #a7f3d0; }
+.save-result.err { display: block; background: var(--red-bg);   color: var(--red);   border: 1px solid #fca5a5; }
+
+.restart-note {
+  background: #fffbeb; border: 1px solid #fde68a; color: #92400e;
+  border-radius: 10px; padding: 13px 16px; font-size: 13px; margin-top: 12px; line-height: 1.6;
+}
+
+/* ── Responsive ── */
+@media (max-width: 640px) {
+  .sidebar { display: none; }
+  .content { padding: 20px 16px; max-width: 100%; }
+  .summary-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>🤖 IT Monitor Bot — Setup Wizard</h1>
+    <div class="actions">
+      <a href="/settings" class="btn-ghost">⚙️ Settings</a>
+      <a href="/setup/logout" class="btn-ghost">ออกจากระบบ</a>
+    </div>
+  </header>
+
+  <div class="main">
+    <!-- Sidebar -->
+    <nav class="sidebar">
+      <div class="sidebar-title">ขั้นตอน</div>
+      <div class="step-item active" data-step="1" onclick="goTo(1)">
+        <div class="step-num">1</div><div class="step-label">📱 LINE</div>
+      </div>
+      <div class="step-item" data-step="2" onclick="goTo(2)">
+        <div class="step-num">2</div><div class="step-label">🔌 Zabbix</div>
+      </div>
+      <div class="step-item" data-step="3" onclick="goTo(3)">
+        <div class="step-num">3</div><div class="step-label">📡 Omada WiFi</div>
+      </div>
+      <div class="step-item" data-step="4" onclick="goTo(4)">
+        <div class="step-num">4</div><div class="step-label">📹 HikCentral</div>
+      </div>
+      <div class="step-item" data-step="5" onclick="goTo(5)">
+        <div class="step-num">5</div><div class="step-label">🤖 Claude AI</div>
+      </div>
+      <div class="step-item" data-step="6" onclick="goTo(6)">
+        <div class="step-num">6</div><div class="step-label">💾 บันทึก</div>
+      </div>
+    </nav>
+
+    <!-- Content -->
+    <div class="content">
+
+      <!-- Step 1: LINE -->
+      <div class="step-panel active" id="step1">
+        <div class="panel-title">📱 LINE Messaging API</div>
+        <div class="panel-subtitle">ตั้งค่าการเชื่อมต่อกับ LINE Bot ของคุณ</div>
+        <div class="card">
+          <div class="field">
+            <label>Channel Secret <span class="req">*</span></label>
+            <div class="input-wrap">
+              <input type="password" id="lineChannelSecret" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+              <button class="toggle-vis" onclick="toggleVis('lineChannelSecret')">👁</button>
+            </div>
+            <div class="field-hint">ดูได้ที่ <strong>LINE Developers Console</strong> → เลือก Channel → Basic settings → Channel secret</div>
+          </div>
+          <div class="field">
+            <label>Channel Access Token <span class="req">*</span></label>
+            <div class="input-wrap">
+              <input type="password" id="lineChannelAccessToken" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...">
+              <button class="toggle-vis" onclick="toggleVis('lineChannelAccessToken')">👁</button>
+            </div>
+            <div class="field-hint">LINE Developers Console → Messaging API → Channel access token (long-lived)</div>
+          </div>
+          <div class="test-row">
+            <button class="btn-test" onclick="testService('line')">🔗 ทดสอบการเชื่อมต่อ</button>
+            <div class="test-result" id="line-result"></div>
+          </div>
+        </div>
+        <div class="nav-row">
+          <span></span>
+          <button class="btn-nav btn-next" onclick="nextStep()">ถัดไป →</button>
+        </div>
+      </div>
+
+      <!-- Step 2: Zabbix -->
+      <div class="step-panel" id="step2">
+        <div class="panel-title">🔌 Zabbix Monitoring</div>
+        <div class="panel-subtitle">เชื่อมต่อ Zabbix เพื่อดึงข้อมูล alert และ host</div>
+        <div class="card">
+          <div class="field">
+            <label>Zabbix URL <span class="req">*</span></label>
+            <div class="input-wrap">
+              <input type="text" id="zabbixUrl" placeholder="https://zabbix.example.com">
+            </div>
+            <div class="field-hint">URL ของ Zabbix web interface (ไม่ต้องใส่ /api_jsonrpc.php)</div>
+          </div>
+          <div class="field">
+            <label>API Token <span class="req">*</span></label>
+            <div class="input-wrap">
+              <input type="password" id="zabbixApiToken" placeholder="Zabbix API token">
+              <button class="toggle-vis" onclick="toggleVis('zabbixApiToken')">👁</button>
+            </div>
+            <div class="field-hint">Zabbix → Administration → API tokens → Create token</div>
+          </div>
+          <div class="test-row">
+            <button class="btn-test" onclick="testService('zabbix')">🔗 ทดสอบการเชื่อมต่อ</button>
+            <div class="test-result" id="zabbix-result"></div>
+          </div>
+        </div>
+        <div class="nav-row">
+          <button class="btn-nav btn-prev" onclick="prevStep()">← ก่อนหน้า</button>
+          <button class="btn-nav btn-next" onclick="nextStep()">ถัดไป →</button>
+        </div>
+      </div>
+
+      <!-- Step 3: Omada -->
+      <div class="step-panel" id="step3">
+        <div class="panel-title">📡 Omada WiFi Controller</div>
+        <div class="panel-subtitle">ตรวจสอบ Access Point และ WiFi client (ไม่บังคับ)</div>
+        <div class="card">
+          <div class="switch-wrap">
+            <label class="switch"><input type="checkbox" id="omadaEnabled" onchange="toggleSection('omada')"><span class="slider"></span></label>
+            <span class="switch-label">เปิดใช้งาน Omada</span>
+          </div>
+          <div class="optional-fields" id="omada-fields">
+            <div class="field">
+              <label>Omada Controller URL <span class="req">*</span></label>
+              <div class="input-wrap">
+                <input type="text" id="omadaUrl" placeholder="https://omada.example.com:8043">
+              </div>
+            </div>
+            <div class="field">
+              <label>Username <span class="req">*</span></label>
+              <div class="input-wrap">
+                <input type="text" id="omadaUsername" placeholder="admin">
+              </div>
+            </div>
+            <div class="field">
+              <label>Password <span class="req">*</span></label>
+              <div class="input-wrap">
+                <input type="password" id="omadaPassword" placeholder="รหัสผ่าน Omada">
+                <button class="toggle-vis" onclick="toggleVis('omadaPassword')">👁</button>
+              </div>
+            </div>
+            <div class="field">
+              <label>Site ID <span class="req">*</span></label>
+              <div class="input-wrap">
+                <input type="text" id="omadaSiteId" placeholder="default">
+              </div>
+              <div class="field-hint">Omada → Settings → Site → Site ID หรือใช้ "default"</div>
+            </div>
+            <div class="test-row">
+              <button class="btn-test" onclick="testService('omada')">🔗 ทดสอบการเชื่อมต่อ</button>
+              <div class="test-result" id="omada-result"></div>
+            </div>
+          </div>
+        </div>
+        <div class="nav-row">
+          <button class="btn-nav btn-prev" onclick="prevStep()">← ก่อนหน้า</button>
+          <button class="btn-nav btn-next" onclick="nextStep()">ถัดไป →</button>
+        </div>
+      </div>
+
+      <!-- Step 4: HikCentral -->
+      <div class="step-panel" id="step4">
+        <div class="panel-title">📹 HikCentral CCTV</div>
+        <div class="panel-subtitle">ตรวจสอบกล้องวงจรปิด HikVision (ไม่บังคับ)</div>
+        <div class="card">
+          <div class="switch-wrap">
+            <label class="switch"><input type="checkbox" id="hikcentralEnabled" onchange="toggleSection('hikcentral')"><span class="slider"></span></label>
+            <span class="switch-label">เปิดใช้งาน HikCentral</span>
+          </div>
+          <div class="optional-fields" id="hikcentral-fields">
+            <div class="field">
+              <label>HikCentral URL <span class="req">*</span></label>
+              <div class="input-wrap">
+                <input type="text" id="hikcentralUrl" placeholder="http://hikcentral.example.com">
+              </div>
+            </div>
+            <div class="field">
+              <label>Client ID <span class="req">*</span></label>
+              <div class="input-wrap">
+                <input type="text" id="hikcentralClientId" placeholder="Client ID จาก HikCentral">
+              </div>
+            </div>
+            <div class="field">
+              <label>Client Secret <span class="req">*</span></label>
+              <div class="input-wrap">
+                <input type="password" id="hikcentralClientSecret" placeholder="Client Secret">
+                <button class="toggle-vis" onclick="toggleVis('hikcentralClientSecret')">👁</button>
+              </div>
+              <div class="field-hint">HikCentral → System → OpenAPI → สร้าง API key</div>
+            </div>
+            <div class="test-row">
+              <button class="btn-test" onclick="testService('hikcentral')">🔗 ทดสอบการเชื่อมต่อ</button>
+              <div class="test-result" id="hikcentral-result"></div>
+            </div>
+          </div>
+        </div>
+        <div class="nav-row">
+          <button class="btn-nav btn-prev" onclick="prevStep()">← ก่อนหน้า</button>
+          <button class="btn-nav btn-next" onclick="nextStep()">ถัดไป →</button>
+        </div>
+      </div>
+
+      <!-- Step 5: Claude -->
+      <div class="step-panel" id="step5">
+        <div class="panel-title">🤖 Claude AI</div>
+        <div class="panel-subtitle">เปิดใช้งาน AI วิเคราะห์ปัญหาอัตโนมัติ</div>
+        <div class="card">
+          <div class="field">
+            <label>Anthropic API Key <span class="req">*</span></label>
+            <div class="input-wrap">
+              <input type="password" id="claudeApiKey" placeholder="sk-ant-api03-xxxxxxxx">
+              <button class="toggle-vis" onclick="toggleVis('claudeApiKey')">👁</button>
+            </div>
+            <div class="field-hint">ดูได้ที่ <strong>console.anthropic.com</strong> → API Keys → Create Key</div>
+          </div>
+          <div class="test-row">
+            <button class="btn-test" onclick="testService('claude')">🔗 ทดสอบ Claude API</button>
+            <div class="test-result" id="claude-result"></div>
+          </div>
+        </div>
+        <div class="nav-row">
+          <button class="btn-nav btn-prev" onclick="prevStep()">← ก่อนหน้า</button>
+          <button class="btn-nav btn-next" onclick="buildSummary(); nextStep()">ถัดไป →</button>
+        </div>
+      </div>
+
+      <!-- Step 6: Summary & Save -->
+      <div class="step-panel" id="step6">
+        <div class="panel-title">💾 บันทึกการตั้งค่า</div>
+        <div class="panel-subtitle">ตรวจสอบและบันทึกค่าทั้งหมด</div>
+
+        <div class="card">
+          <div style="font-size:13px; font-weight:700; color:var(--gray-600); margin-bottom:12px; text-transform:uppercase; letter-spacing:.5px;">สรุปการตั้งค่า</div>
+          <div class="summary-grid" id="summaryGrid"></div>
+        </div>
+
+        <div class="card">
+          <div style="font-size:14px; font-weight:700; color:var(--gray-800); margin-bottom:14px;">🔒 ตั้งรหัสผ่าน Setup (แนะนำ)</div>
+          <div class="field">
+            <label>รหัสผ่านใหม่ <span class="opt">เว้นไว้ถ้าจะใช้รหัสเดิม</span></label>
+            <div class="input-wrap">
+              <input type="password" id="setupPassword" placeholder="อย่างน้อย 4 ตัวอักษร">
+              <button class="toggle-vis" onclick="toggleVis('setupPassword')">👁</button>
+            </div>
+            <div class="field-hint">รหัสเริ่มต้น: <strong>admin</strong> — แนะนำให้เปลี่ยนก่อนใช้งานจริง</div>
+          </div>
+        </div>
+
+        <div id="saveResult" class="save-result"></div>
+        <div class="restart-note" id="restartNote" style="display:none">
+          ⚠️ <strong>บันทึกสำเร็จ!</strong> กรุณา Restart Bot เพื่อให้การตั้งค่าใหม่มีผล<br>
+          <code style="font-size:12px; background:#fff8; padding:2px 6px; border-radius:4px; margin-top:4px; display:inline-block;">pm2 restart bot</code> หรือปิด-เปิด process ใหม่
+        </div>
+
+        <div class="nav-row">
+          <button class="btn-nav btn-prev" onclick="prevStep()">← ก่อนหน้า</button>
+          <button class="btn-nav btn-save btn-next" onclick="saveAll()" id="saveBtn">💾 บันทึกทั้งหมด</button>
+        </div>
+      </div>
+
+    </div><!-- /content -->
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<script>
+let currentStep = 1;
+const TOTAL = 6;
+
+// ── Load existing config on page load ──────────────────────────────────────
+window.addEventListener('DOMContentLoaded', async () => {
+  try {
+    const r = await fetch('/api/config/current');
+    const d = await r.json();
+    // Pre-fill non-sensitive fields
+    if (d.zabbix?.url)           setVal('zabbixUrl', d.zabbix.url);
+    if (d.omada?.url)            setVal('omadaUrl',  d.omada.url);
+    if (d.omada?.username)       setVal('omadaUsername', d.omada.username);
+    if (d.omada?.siteId)         setVal('omadaSiteId',   d.omada.siteId);
+    if (d.hikcentral?.url)       setVal('hikcentralUrl',      d.hikcentral.url);
+    if (d.hikcentral?.clientId)  setVal('hikcentralClientId', d.hikcentral.clientId);
+    // Restore toggle states
+    if (d.omada?.enabled)      { setChecked('omadaEnabled',      true); toggleSection('omada'); }
+    if (d.hikcentral?.enabled) { setChecked('hikcentralEnabled', true); toggleSection('hikcentral'); }
+    // Placeholder for already-set secrets
+    if (d.line?.channelSecret?.set)       setPlaceholder('lineChannelSecret',      '(ตั้งค่าแล้ว — เว้นไว้ถ้าไม่ต้องการเปลี่ยน)');
+    if (d.line?.channelAccessToken?.set)  setPlaceholder('lineChannelAccessToken', '(ตั้งค่าแล้ว — เว้นไว้ถ้าไม่ต้องการเปลี่ยน)');
+    if (d.zabbix?.apiToken?.set)          setPlaceholder('zabbixApiToken',         '(ตั้งค่าแล้ว — เว้นไว้ถ้าไม่ต้องการเปลี่ยน)');
+    if (d.omada?.password?.set)           setPlaceholder('omadaPassword',           '(ตั้งค่าแล้ว — เว้นไว้ถ้าไม่ต้องการเปลี่ยน)');
+    if (d.hikcentral?.clientSecret?.set)  setPlaceholder('hikcentralClientSecret',  '(ตั้งค่าแล้ว — เว้นไว้ถ้าไม่ต้องการเปลี่ยน)');
+    if (d.claude?.apiKey?.set)            setPlaceholder('claudeApiKey',            '(ตั้งค่าแล้ว — เว้นไว้ถ้าไม่ต้องการเปลี่ยน)');
+  } catch(e) { console.warn('Could not load current config', e); }
+});
+
+function setVal(id, v)  { const el = document.getElementById(id); if(el && v) el.value = v; }
+function setPlaceholder(id, p) { const el = document.getElementById(id); if(el) el.placeholder = p; }
+function setChecked(id, v) { const el = document.getElementById(id); if(el) el.checked = v; }
+function getVal(id) { return (document.getElementById(id)?.value || '').trim(); }
+
+// ── Step navigation ────────────────────────────────────────────────────────
+function goTo(n) {
+  document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.step-item').forEach((s, i) => {
+    s.classList.remove('active');
+    if (i + 1 < n) s.classList.add('done');
+    else if (i + 1 === n) s.classList.add('active');
+    else s.classList.remove('done');
+  });
+  document.getElementById('step' + n)?.classList.add('active');
+  currentStep = n;
+  window.scrollTo(0, 0);
+}
+
+function nextStep() {
+  if (currentStep < TOTAL) goTo(currentStep + 1);
+}
+function prevStep() {
+  if (currentStep > 1) goTo(currentStep - 1);
+}
+
+// ── Toggle optional sections ───────────────────────────────────────────────
+function toggleSection(svc) {
+  const enabled = document.getElementById(svc + 'Enabled')?.checked;
+  const fields  = document.getElementById(svc + '-fields');
+  if (fields) fields.classList.toggle('show', !!enabled);
+}
+
+// ── Show/hide password ─────────────────────────────────────────────────────
+function toggleVis(id) {
+  const el = document.getElementById(id);
+  if (el) el.type = el.type === 'password' ? 'text' : 'password';
+}
+
+// ── Test service connection ────────────────────────────────────────────────
+async function testService(svc) {
+  const resEl = document.getElementById(svc + '-result');
+  const body  = buildTestBody(svc);
+
+  resEl.className = 'test-result';
+  resEl.textContent = '⏳ กำลังทดสอบ...';
+  resEl.style.display = 'block';
+
+  try {
+    const r = await fetch('/api/config/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ service: svc, ...body }),
+    });
+    const d = await r.json();
+    resEl.className = 'test-result ' + (d.ok ? 'ok' : 'err');
+    resEl.textContent = d.message || (d.ok ? 'สำเร็จ' : 'ล้มเหลว');
+  } catch(e) {
+    resEl.className = 'test-result err';
+    resEl.textContent = '❌ ' + e.message;
+  }
+}
+
+function buildTestBody(svc) {
+  const m = {
+    line:       { channelAccessToken: getVal('lineChannelAccessToken') },
+    zabbix:     { url: getVal('zabbixUrl'), apiToken: getVal('zabbixApiToken') },
+    omada:      { url: getVal('omadaUrl'), username: getVal('omadaUsername'), password: getVal('omadaPassword') },
+    hikcentral: { url: getVal('hikcentralUrl'), clientId: getVal('hikcentralClientId'), clientSecret: getVal('hikcentralClientSecret') },
+    claude:     { apiKey: getVal('claudeApiKey') },
+  };
+  return m[svc] || {};
+}
+
+// ── Build summary for step 6 ───────────────────────────────────────────────
+function buildSummary() {
+  const items = [
+    { label: 'LINE',       ok: !!(getVal('lineChannelSecret') || document.getElementById('lineChannelSecret')?.placeholder?.includes('ตั้งค่าแล้ว')), text: 'Channel Secret + Token' },
+    { label: 'Zabbix',     ok: !!(getVal('zabbixUrl')),         text: getVal('zabbixUrl') || '—' },
+    { label: 'Omada WiFi', ok: document.getElementById('omadaEnabled')?.checked, optional: true, text: document.getElementById('omadaEnabled')?.checked ? getVal('omadaUrl') || '—' : 'ปิดใช้งาน' },
+    { label: 'HikCentral', ok: document.getElementById('hikcentralEnabled')?.checked, optional: true, text: document.getElementById('hikcentralEnabled')?.checked ? getVal('hikcentralUrl') || '—' : 'ปิดใช้งาน' },
+    { label: 'Claude AI',  ok: !!(getVal('claudeApiKey') || document.getElementById('claudeApiKey')?.placeholder?.includes('ตั้งค่าแล้ว')), text: 'Anthropic API Key' },
+  ];
+  const grid = document.getElementById('summaryGrid');
+  grid.innerHTML = items.map(it => `
+    <div class="summary-card">
+      <div class="sc-label">${it.label}</div>
+      <div class="sc-status ${it.ok ? 'sc-ok' : (it.optional ? 'sc-warn' : 'sc-err')}">
+        ${it.ok ? '✅' : (it.optional ? '⏸️' : '⚠️')} ${it.text}
+      </div>
+    </div>
+  `).join('');
+}
+
+// ── Save all ───────────────────────────────────────────────────────────────
+async function saveAll() {
+  const btn = document.getElementById('saveBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ กำลังบันทึก...';
+
+  const payload = {
+    lineChannelSecret:      getVal('lineChannelSecret'),
+    lineChannelAccessToken: getVal('lineChannelAccessToken'),
+    zabbixUrl:              getVal('zabbixUrl'),
+    zabbixApiToken:         getVal('zabbixApiToken'),
+    omadaEnabled:           document.getElementById('omadaEnabled')?.checked,
+    omadaUrl:               getVal('omadaUrl'),
+    omadaUsername:          getVal('omadaUsername'),
+    omadaPassword:          getVal('omadaPassword'),
+    omadaSiteId:            getVal('omadaSiteId'),
+    hikcentralEnabled:      document.getElementById('hikcentralEnabled')?.checked,
+    hikcentralUrl:          getVal('hikcentralUrl'),
+    hikcentralClientId:     getVal('hikcentralClientId'),
+    hikcentralClientSecret: getVal('hikcentralClientSecret'),
+    claudeApiKey:           getVal('claudeApiKey'),
+    setupPassword:          getVal('setupPassword'),
+  };
+
+  try {
+    const r = await fetch('/api/config/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    const el = document.getElementById('saveResult');
+    el.className = 'save-result ' + (d.ok ? 'ok' : 'err');
+    el.textContent = d.message || d.error;
+    if (d.ok) document.getElementById('restartNote').style.display = 'block';
+  } catch(e) {
+    const el = document.getElementById('saveResult');
+    el.className = 'save-result err';
+    el.textContent = '❌ ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '💾 บันทึกทั้งหมด';
+  }
+}
+</script>
+</body>
+</html>
