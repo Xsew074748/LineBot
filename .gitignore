@@ -2,8 +2,7 @@
 .env
 
 # ── ข้อมูล Runtime (สร้างอัตโนมัติตอนรัน) ───────────────
-data/users.json
-data/notified_alerts.json
+data/
 
 # ── Cloudflare Tunnel credentials ────────────────────────
 *.credentials.json
@@ -16,6 +15,9 @@ node_modules/
 logs/
 *.log
 npm-debug.log*
+
+# ── curl session files ────────────────────────────────────
+cookies.txt
 
 # ── OS / Editor ───────────────────────────────────────────
 .DS_Store

@@ -1,9 +1,12 @@
 'use strict';
-const express = require('express');
-const fs      = require('fs');
-const path    = require('path');
-const axios   = require('axios');
-const auth    = require('../middleware/setupAuth');
+const express    = require('express');
+const fs         = require('fs');
+const path       = require('path');
+const axios      = require('axios');
+const auth       = require('../middleware/setupAuth');
+// testConnection: ฟังก์ชัน test ของ Omada — ใช้ flow เดียวกับ service จริง
+// (GET /api/info → POST /{omadacId}/api/v2/login) + httpsAgent เดียวกัน
+const { testConnection: omadaTestConn } = require('../services/omada');
 
 const router   = express.Router();
 const ENV_PATH = path.join(__dirname, '..', '.env');
@@ -181,10 +184,8 @@ router.post('/test', async (req, res) => {
       const user = get('username', 'OMADA_USERNAME');
       const pass = get('password', 'OMADA_PASSWORD');
       if (!url || !user || !pass) return res.json({ ok: false, message: 'กรุณากรอก URL, Username และ Password' });
-      const r = await axios.post(`${url.replace(/\/$/, '')}/api/v2/hotspot/login`,
-        { username: user, password: pass }, { timeout: 6000 });
-      const ok = r.data?.errorCode === 0;
-      return res.json({ ok, message: ok ? '✅ เชื่อมต่อ Omada สำเร็จ' : (r.data?.msg || 'Login ล้มเหลว') });
+      // ใช้ testConnection จาก service — flow และ httpsAgent เดียวกับที่ใช้จริง
+      return res.json(await omadaTestConn(url, user, pass));
     }
 
     if (svc === 'hikcentral') {

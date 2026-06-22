@@ -11,10 +11,12 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.36.3",
     "@line/bot-sdk": "^9.4.0",
+    "@modelcontextprotocol/sdk": "^1.12.0",
     "axios": "^1.7.9",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "express-rate-limit": "^7.5.0"
+    "express-rate-limit": "^7.5.0",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "jest": "^29.7.0"

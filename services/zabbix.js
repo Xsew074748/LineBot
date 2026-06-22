@@ -3,8 +3,9 @@ require('dotenv').config();
 const axios  = require('axios');
 const logger = require('./logger');
 
-const BASE_URL = process.env.ZABBIX_URL || '';
-const API_TOKEN = process.env.ZABBIX_API_TOKEN || '';
+const BASE_URL    = process.env.ZABBIX_URL          || '';
+const API_TOKEN   = process.env.ZABBIX_API_TOKEN    || '';
+const TIMEOUT_MS  = parseInt(process.env.ZABBIX_TIMEOUT_MS || '15000', 10);
 
 // ── Priority label ─────────────────────────────────────────────────────────────
 const PRIORITY = {
@@ -28,7 +29,7 @@ async function rpc(method, params, { auth = true } = {}) {
     const resp = await axios.post(
       BASE_URL,
       { jsonrpc: '2.0', method, params, id: 1 },
-      { headers, timeout: 10_000 }
+      { headers, timeout: TIMEOUT_MS }
     );
     logger.apiCall('Zabbix', method, Date.now() - start);
 

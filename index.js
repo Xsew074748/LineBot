@@ -729,7 +729,13 @@ async function refreshOfflineCameraCache() {
     offlineCamCache.refreshedAt = Date.now();
     logger.info(`poller: offline cameras refreshed (total=${raw.total})`);
   } catch (err) {
-    logger.error('poller: offline camera refresh failed', err);
+    // timeout → warn + ใช้ cache เดิมต่อ (ไม่ reset offlineCamCache.raw)
+    const isTimeout = err.code === 'ECONNABORTED' || /timeout/i.test(err.message);
+    if (isTimeout) {
+      logger.warn(`poller: Zabbix timeout — ใช้ cache เดิมต่อ (cached total=${offlineCamCache.raw?.total ?? 'none'})`);
+    } else {
+      logger.error('poller: offline camera refresh failed', err);
+    }
   }
 }
 
