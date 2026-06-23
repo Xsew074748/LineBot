@@ -52,7 +52,10 @@ function mask(val) {
 }
 
 // ── Update enabled flag in config.js ────────────────────────────────────────
+const ALLOWED_SERVICES = ['omada', 'hikcentral'];
+
 function updateConfigEnabled(service, enabled) {
+  if (!ALLOWED_SERVICES.includes(service)) return;
   if (enabled === undefined || enabled === null) return;
   try {
     let src = fs.readFileSync(CFG_PATH, 'utf8');
@@ -167,6 +170,10 @@ router.post('/test', async (req, res) => {
 
   try {
     const svc = b.service;
+    const ALLOWED_TEST_SERVICES = ['zabbix', 'omada', 'hikcentral', 'claude', 'line'];
+    if (!ALLOWED_TEST_SERVICES.includes(svc)) {
+      return res.status(400).json({ ok: false, error: 'ไม่รู้จัก service' });
+    }
 
     if (svc === 'zabbix') {
       const url   = get('url', 'ZABBIX_URL');
@@ -221,7 +228,7 @@ router.post('/test', async (req, res) => {
       return res.json({ ok: !!name, message: name ? `✅ Bot: ${name}` : 'Token ไม่ถูกต้อง' });
     }
 
-    res.status(400).json({ ok: false, error: `ไม่รู้จัก service: ${b.service}` });
+    res.status(400).json({ ok: false, error: 'ไม่รู้จัก service' });
   } catch (err) {
     const msg = err.response?.data?.message || err.response?.data?.msg || err.message || 'เชื่อมต่อไม่ได้';
     res.json({ ok: false, message: `❌ ${msg}` });
