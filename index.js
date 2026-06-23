@@ -116,11 +116,20 @@ async function withAI(userId, replyToken, aiCall) {
 // ── Verify LINE Signature ──────────────────────────────────────────────────────
 // ตรวจสอบ HMAC SHA256 ก่อนทุก webhook เพื่อยืนยันว่ามาจาก LINE จริง
 function verifyLineSignature(body, signature) {
-  const expected = crypto
-    .createHmac('sha256', process.env.LINE_CHANNEL_SECRET)
-    .update(body)
-    .digest('base64');
-  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  try {
+    if (!signature) return false;
+    const expected = crypto
+      .createHmac('sha256', process.env.LINE_CHANNEL_SECRET)
+      .update(body)
+      .digest('base64');
+    const sigBuf = Buffer.from(signature);
+    const expBuf = Buffer.from(expected);
+    // timingSafeEqual บังคับให้ทั้งสอง buffer ยาวเท่ากัน — ตรวจก่อนเรียกเสมอ
+    if (sigBuf.length !== expBuf.length) return false;
+    return crypto.timingSafeEqual(sigBuf, expBuf);
+  } catch {
+    return false;
+  }
 }
 
 // ── /health endpoint ───────────────────────────────────────────────────────────
