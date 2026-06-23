@@ -885,10 +885,17 @@ async function handleZabbixPush(body) {
     comments:      body.comments || '',
   };
 
-  const analysis  = await ai.analyzeAlert(alert);
   const processed = processProblems([alert]);
-  const flex      = fmt.buildAlerts(processed, analysis);
 
+  // AI เป็นส่วนเสริม — push ต้องเกิดเสมอไม่ว่า AI จะทำงานหรือไม่
+  let analysis = null;
+  try {
+    analysis = await ai.analyzeAlert(alert);
+  } catch (err) {
+    logger.warn(`zabbix-webhook: AI วิเคราะห์ไม่ได้ — push ต่อโดยไม่มี AI (${err.message})`);
+  }
+
+  const flex = fmt.buildAlerts(processed, analysis);
   await pushToUsers(null, severity, flex);
 }
 
