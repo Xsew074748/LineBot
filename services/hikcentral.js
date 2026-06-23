@@ -42,7 +42,7 @@ async function login() {
 }
 
 // ── GET helper ─────────────────────────────────────────────────────────────────
-async function hikGet(path, params = {}) {
+async function hikGet(path, params = {}, retried = false) {
   if (!accessToken || Date.now() >= tokenExpAt) await login();
 
   const start = Date.now();
@@ -56,9 +56,12 @@ async function hikGet(path, params = {}) {
     return resp.data;
   } catch (err) {
     logger.apiCall('HikCentral', path, Date.now() - start, false);
+    // Token หมดอายุ → clear แล้วลองใหม่ครั้งเดียว
     if (err.response?.status === 401) {
+      if (retried) throw err;
       accessToken = null;
-      return hikGet(path, params); // retry 1 ครั้ง
+      tokenExpAt  = 0;
+      return hikGet(path, params, true);
     }
     throw err;
   }
