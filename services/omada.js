@@ -89,7 +89,7 @@ async function getToken() {
 }
 
 // ── GET helper (low-level) — รับ absolute path ────────────────────────────────
-async function omadaGet(path) {
+async function omadaGet(path, retried = false) {
   const token = await getToken();
   const start = Date.now();
   try {
@@ -110,10 +110,13 @@ async function omadaGet(path) {
     return body.result;
   } catch (err) {
     logger.apiCall('Omada', path, Date.now() - start, false);
-    // Token หมดอายุ → login ใหม่แล้วลองอีกครั้ง (ห้ามวนซ้ำ)
+    // Token/cookie หมดอายุ → clear ทั้งคู่แล้วลองใหม่ครั้งเดียว
+    // cookie หมดอายุคู่กับ token — clear แค่ token แล้ว login จะได้ cookie ใหม่
     if (err.response?.status === 401) {
-      authToken = null;
-      return omadaGet(path);
+      if (retried) throw err;
+      authToken     = null;
+      sessionCookie = null;
+      return omadaGet(path, true);
     }
     throw err;
   }
