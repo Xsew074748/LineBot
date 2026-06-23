@@ -156,7 +156,14 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
 });
 
 // ── /zabbix-webhook endpoint (Auto Alert จาก Zabbix Webhook Media Type) ────────
-app.post('/zabbix-webhook', express.json(), async (req, res) => {
+// Zabbix ต้องส่ง header  x-zabbix-secret: <ZABBIX_WEBHOOK_SECRET>
+// ตั้งได้ที่ Zabbix > Alerts > Media types > Webhook > Parameters
+//   หรือ Actions > Operations > Message > (custom HTTP header)
+app.post('/zabbix-webhook', express.json({ limit: '10kb' }), async (req, res) => {
+  const secret = process.env.ZABBIX_WEBHOOK_SECRET;
+  if (!secret || req.headers['x-zabbix-secret'] !== secret) {
+    return res.sendStatus(401);
+  }
   res.sendStatus(200);
   try {
     await handleZabbixPush(req.body);
