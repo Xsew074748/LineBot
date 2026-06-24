@@ -607,8 +607,8 @@ async function route(text, rawText, userId, replyToken) {
       if (!auth.canExecute(userId, 'wifi')) return reply(replyToken, fmt.buildError('คุณไม่มีสิทธิ์ใช้คำสั่งนี้'));
       if (!omada) return reply(replyToken, fmt.buildError('Omada ยังไม่เปิดใช้งาน'));
       const aps = await omada.getAPs();
-      const wifiOffline = aps.filter((a) => a.status !== '🟢 เชื่อมต่อ');
-      const wifiCtxText = `AP ทั้งหมด ${aps.length} เครื่อง เชื่อมต่อ ${aps.filter((a) => a.status === '🟢 เชื่อมต่อ').length} ไม่เชื่อมต่อ ${wifiOffline.length}` +
+      const wifiOffline = aps.filter((a) => a.isProblem);
+      const wifiCtxText = `AP ทั้งหมด ${aps.length} เครื่อง ปกติ ${aps.filter((a) => !a.isProblem).length} มีปัญหา ${wifiOffline.length}` +
         (wifiOffline.length > 0 ? `: ${wifiOffline.slice(0, 10).map((a) => a.name).join(', ')}` : '');
       userLastWifiCtx.set(userId, { text: wifiCtxText, setAt: Date.now() });
       return reply(replyToken, fmt.buildHosts(aps, null, 'สถานะ Access Point', '📶', 'วิเคราะห์ wifi'));

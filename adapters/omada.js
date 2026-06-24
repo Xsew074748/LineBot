@@ -42,7 +42,7 @@ class OmadaAdapter extends BaseMonitorAdapter {
         device: ap.name,
         zone:   'ไม่ระบุ',
         type:   'ap',
-        status: ap.status === '🟢 เชื่อมต่อ' ? 'up' : 'down',
+        status: ap.isProblem ? 'down' : 'up',
         ip:     null,
       }));
     } catch (err) {

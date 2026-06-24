@@ -110,13 +110,13 @@ async function omadaGet(path, retried = false) {
       throw e;
     }
 
-    logger.apiCall('Omada', path, Date.now() - start);
     const body = typeof raw === 'string' ? JSON.parse(raw) : raw;
     if (body.errorCode !== 0) {
       const msg = body.msg || body.message || 'unknown error';
       logger.warn(`omada: errorCode=${body.errorCode} msg="${msg}" path=${path}`);
       throw new Error(`Omada API error [${body.errorCode}]: ${msg}`);
     }
+    logger.apiCall('Omada', path, Date.now() - start);
     return body.result;
   } catch (err) {
     logger.apiCall('Omada', path, Date.now() - start, false);
@@ -182,12 +182,15 @@ async function getAPs(siteId = SITE_ID) {
   return aps.map((ap) => {
     const connStatus = CONNECTION_STATUS[ap.status] ?? `⚪ status=${ap.status}`;
     return {
-      name:    ap.name,
-      mac:     ap.mac,
-      status:  connStatus,
-      health:  healthLabel(ap.healthScore),
-      clients: ap.clientNum || 0,
-      model:   ap.model || 'N/A',
+      name:      ap.name,
+      mac:       ap.mac,
+      status:    connStatus,
+      health:    healthLabel(ap.healthScore),
+      clients:   ap.clientNum || 0,
+      model:     ap.model || 'N/A',
+      // true เฉพาะ state ที่เป็นปัญหาจริง (0=ไม่เชื่อมต่อ, 7=ตั้งค่าล้มเหลว, 10=ถูกปฏิเสธ)
+      // transient (1/2/3/4/5) และ connected (14) = false — ไม่นับ offline
+      isProblem: [0, 7, 10].includes(ap.status),
     };
   });
 }
@@ -195,10 +198,12 @@ async function getAPs(siteId = SITE_ID) {
 // ── ดึง Client ที่เชื่อมต่อ WiFi ─────────────────────────────────────────────
 async function getClients(siteId = SITE_ID) {
   const result = await omadaSiteGet(siteId, 'clients?currentPage=1&currentPageSize=1000');
+  const data  = Array.isArray(result) ? result : (result?.data  || []);
+  const total = Array.isArray(result) ? result.length : (result?.totalRows || 0);
   return {
-    total:    result?.totalRows || 0,
-    wireless: (result?.data || []).filter((c) => c.wireless).length,
-    wired:    (result?.data || []).filter((c) => !c.wireless).length,
+    total,
+    wireless: data.filter((c) =>  c.wireless).length,
+    wired:    data.filter((c) => !c.wireless).length,
   };
 }
 
