@@ -224,8 +224,8 @@ describe('OmadaAdapter', () => {
   describe('getDevices()', () => {
     it('แปลง Omada APs เป็น normalized devices', async () => {
       omadaSvc.getAPs.mockResolvedValue([
-        { name: 'AP-Floor-1', mac: 'AA:BB:CC:DD:EE:01', status: '🟢 ออนไลน์', clients: 12, model: 'EAP660' },
-        { name: 'AP-Floor-2', mac: 'AA:BB:CC:DD:EE:02', status: '🔴 ออฟไลน์', clients: 0,  model: 'EAP670' },
+        { name: 'AP-Floor-1', mac: 'AA:BB:CC:DD:EE:01', status: '🟢 เชื่อมต่อ',     clients: 12, model: 'EAP660' },
+        { name: 'AP-Floor-2', mac: 'AA:BB:CC:DD:EE:02', status: '🔴 ไม่เชื่อมต่อ', clients: 0,  model: 'EAP670' },
       ]);
       const result = await adapter.getDevices();
       expect(result).toHaveLength(2);

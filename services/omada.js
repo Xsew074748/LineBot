@@ -100,8 +100,18 @@ async function omadaGet(path, retried = false) {
         ...(sessionCookie ? { Cookie: sessionCookie } : {}),
       },
     });
+    const raw = resp.data;
+
+    // Omada คืน HTTP 200 + HTML login page เมื่อ session/cookie หมด (ไม่ใช่ 401)
+    // ตรวจก่อน log OK และก่อน JSON.parse เพื่อกัน SyntaxError และให้ retry ทำงานได้
+    if (typeof raw === 'string' && raw.trimStart().startsWith('<')) {
+      const e = new Error('Omada session expired (HTML response received)');
+      e._htmlSession = true;
+      throw e;
+    }
+
     logger.apiCall('Omada', path, Date.now() - start);
-    const body = typeof resp.data === 'string' ? JSON.parse(resp.data) : resp.data;
+    const body = typeof raw === 'string' ? JSON.parse(raw) : raw;
     if (body.errorCode !== 0) {
       const msg = body.msg || body.message || 'unknown error';
       logger.warn(`omada: errorCode=${body.errorCode} msg="${msg}" path=${path}`);
@@ -110,10 +120,9 @@ async function omadaGet(path, retried = false) {
     return body.result;
   } catch (err) {
     logger.apiCall('Omada', path, Date.now() - start, false);
-    // Token/cookie หมดอายุ → clear ทั้งคู่แล้วลองใหม่ครั้งเดียว
-    // cookie หมดอายุคู่กับ token — clear แค่ token แล้ว login จะได้ cookie ใหม่
-    if (err.response?.status === 401) {
-      if (retried) throw err;
+    // รวม 2 เคส session หมด: HTTP 401 และ HTTP 200 + HTML (Omada redirect ไป login page)
+    if (err.response?.status === 401 || err._htmlSession) {
+      if (retried) throw new Error('Omada session expired — ยังคืน HTML หลัง re-login แล้ว');
       authToken     = null;
       sessionCookie = null;
       return omadaGet(path, true);
@@ -141,30 +150,51 @@ function isAP(d) {
 
 async function getAPs(siteId = SITE_ID) {
   const result = await omadaSiteGet(siteId, 'devices');
-  const all    = result?.data || [];
-
-  // log ทุก device เพื่อดู field type จริง — ลบ/ปิดหลังยืนยันค่าแล้ว
-  all.forEach((d) => logger.info(`omada device: name=${d.name} type=${d.type} mac=${d.mac}`));
+  const all    = Array.isArray(result) ? result : (result?.data || []);
 
   const aps = all.filter(isAP);
 
   if (all.length > 0 && aps.length === 0) {
-    logger.warn(`omada: getAPs กรอง 0 จาก ${all.length} devices — ตรวจ log "omada device: type=..." ด้านบนแล้วปรับ isAP()`);
+    logger.warn(`omada: getAPs กรอง 0 จาก ${all.length} devices — ตรวจ field type ของ device แล้วปรับ isAP()`);
   }
 
-  return aps.map((ap) => ({
-    name:     ap.name,
-    mac:      ap.mac,
-    status:   ap.status === 0 ? '🟢 ออนไลน์' : '🔴 ออฟไลน์',
-    clients:  ap.clientNum || 0,
-    model:    ap.model || 'N/A',
-    _rawType: ap.type, // debug — ลบออกหลังยืนยันค่า type จริงแล้ว
-  }));
+  const CONNECTION_STATUS = {
+    0:  '🔴 ไม่เชื่อมต่อ',
+    1:  '🔵 กำลังผูกอุปกรณ์',
+    2:  '🔵 กำลังตั้งค่า',
+    3:  '🟡 รอตอบรับ',
+    4:  '🔵 กำลังอัปเดต',
+    5:  '🔵 กำลังรีบูต',
+    7:  '🔴 ตั้งค่าล้มเหลว',
+    10: '🔴 ถูกปฏิเสธ',
+    14: '🟢 เชื่อมต่อ',
+  };
+
+  function healthLabel(score) {
+    if (score === -1)              return 'No Data';
+    if (score >= 8 && score <= 10) return '🟢 ดีเยี่ยม';
+    if (score >= 4 && score <= 7)  return '🟡 ปานกลาง';
+    if (score >= 1 && score <= 3)  return '🔴 แย่';
+    if (score === 0)               return '🔴 แย่มาก';
+    return `health=${score}`;
+  }
+
+  return aps.map((ap) => {
+    const connStatus = CONNECTION_STATUS[ap.status] ?? `⚪ status=${ap.status}`;
+    return {
+      name:    ap.name,
+      mac:     ap.mac,
+      status:  connStatus,
+      health:  healthLabel(ap.healthScore),
+      clients: ap.clientNum || 0,
+      model:   ap.model || 'N/A',
+    };
+  });
 }
 
 // ── ดึง Client ที่เชื่อมต่อ WiFi ─────────────────────────────────────────────
 async function getClients(siteId = SITE_ID) {
-  const result = await omadaSiteGet(siteId, 'clients');
+  const result = await omadaSiteGet(siteId, 'clients?currentPage=1&currentPageSize=1000');
   return {
     total:    result?.totalRows || 0,
     wireless: (result?.data || []).filter((c) => c.wireless).length,

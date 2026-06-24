@@ -48,8 +48,9 @@ function buildAPs() {
           name:      `AP-${id}`,
           mac:       `A8:9C:ED:${hex.slice(0,2).toUpperCase()}:${hex.slice(2,4).toUpperCase()}:${hex.slice(4,6).toUpperCase()}`,
           ip:        `10.${b.charCodeAt(0) - 64}.${f}.${a * 10}`,
-          status:    0,                          // 0=online, 1=offline (Omada convention)
-          clientNum: ((idx * 7 + 13) % 25) + 1, // 1–25 (deterministic)
+          status:      1,                            // 1=Connected, 0=Disconnected (real Omada API)
+          healthScore: 85,                           // จำลอง Good health
+          clientNum:   ((idx * 7 + 13) % 25) + 1,  // 1–25 (deterministic)
           model:     AP_MODELS[(idx - 1) % AP_MODELS.length],
           building:  `อาคาร ${b}`,
           floor:     `ชั้น ${f}`,
@@ -89,8 +90,9 @@ function reset() {
 
   // กำหนด AP offline เริ่มต้น
   INIT_OFFLINE_AP_IDX.forEach((i) => {
-    aps[i].status    = 1;
-    aps[i].clientNum = 0;
+    aps[i].status      = 0;    // 0=Disconnected
+    aps[i].healthScore = -1;   // No Data เมื่อ disconnected
+    aps[i].clientNum   = 0;
   });
 }
 

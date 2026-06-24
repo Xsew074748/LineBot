@@ -14,7 +14,7 @@ router.get('/mock/status', (req, res) => {
   const cams       = data.getCameras();
   const aps        = data.getAPs();
   const offlineCams = cams.filter(c => !c.online);
-  const offlineAPs  = aps.filter(a => a.status === 1);
+  const offlineAPs  = aps.filter(a => a.status === 0);
 
   // สรุปกล้องแยกตามอาคาร
   const camsByBuilding = {};
@@ -29,7 +29,7 @@ router.get('/mock/status', (req, res) => {
   for (const b of data.BUILDINGS) {
     const bLabel  = `อาคาร ${b}`;
     const total   = aps.filter(a => a.building === bLabel).length;
-    const offline = aps.filter(a => a.building === bLabel && a.status === 1).length;
+    const offline = aps.filter(a => a.building === bLabel && a.status === 0).length;
     apsByBuilding[bLabel] = { total, online: total - offline, offline };
   }
 
@@ -107,7 +107,7 @@ router.post('/mock/ap/outage', (req, res) => {
   const { count, building } = req.body;
   const aps = data.getAPs();
 
-  let targets = aps.filter(a => a.status === 0);
+  let targets = aps.filter(a => a.status === 1);
   if (building) {
     const label = `อาคาร ${String(building).toUpperCase()}`;
     targets = targets.filter(a => a.building === label);
@@ -117,8 +117,9 @@ router.post('/mock/ap/outage', (req, res) => {
   }
 
   targets.forEach(ap => {
-    ap.status    = 1;
-    ap.clientNum = 0;
+    ap.status      = 0;    // 0=Disconnected
+    ap.healthScore = -1;
+    ap.clientNum   = 0;
   });
 
   res.json({
@@ -127,8 +128,8 @@ router.post('/mock/ap/outage', (req, res) => {
     affected: targets.map(a => a.name),
     summary: {
       total:   aps.length,
-      online:  aps.filter(a => a.status === 0).length,
-      offline: aps.filter(a => a.status === 1).length,
+      online:  aps.filter(a => a.status === 1).length,
+      offline: aps.filter(a => a.status === 0).length,
     },
   });
 });
@@ -156,11 +157,12 @@ router.post('/mock/group-outage', (req, res) => {
   });
 
   // ── APs offline ─────────────────────────────────────────────────────────
-  const apPool    = data.getAPs().filter((a) => a.status === 0 && a.building === zone);
+  const apPool    = data.getAPs().filter((a) => a.status === 1 && a.building === zone);
   const apTargets = apPool.slice(0, Number(apCount));
   apTargets.forEach((ap) => {
-    ap.status    = 1;
-    ap.clientNum = 0;
+    ap.status      = 0;    // 0=Disconnected
+    ap.healthScore = -1;
+    ap.clientNum   = 0;
   });
 
   // ── Normalized events สำหรับทดสอบ correlate() โดยตรง ───────────────────
@@ -210,8 +212,8 @@ router.post('/mock/group-outage', (req, res) => {
       },
       aps: {
         total:   data.getAPs().length,
-        online:  data.getAPs().filter((a) => a.status === 0).length,
-        offline: data.getAPs().filter((a) => a.status === 1).length,
+        online:  data.getAPs().filter((a) => a.status === 1).length,
+        offline: data.getAPs().filter((a) => a.status === 0).length,
       },
     },
   });
@@ -234,8 +236,8 @@ router.post('/mock/reset', (req, res) => {
       },
       aps: {
         total:   aps.length,
-        online:  aps.filter(a => a.status === 0).length,
-        offline: aps.filter(a => a.status === 1).length,
+        online:  aps.filter(a => a.status === 1).length,
+        offline: aps.filter(a => a.status === 0).length,
       },
     },
   });

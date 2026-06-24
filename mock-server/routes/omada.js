@@ -42,12 +42,13 @@ router.get(['/api/v2/sites/:siteId/eaps', '/api/v2/:siteId/eaps'], (req, res) =>
         name:      ap.name,
         mac:       ap.mac,
         ip:        ap.ip,
-        status:    ap.status,    // 0=online, 1=offline
-        clientNum: ap.clientNum,
-        model:     ap.model,
+        status:      ap.status,       // 1=Connected, 0=Disconnected (real Omada API)
+        healthScore: ap.healthScore,  // -1=No Data, บวก=Good/Fair/Poor
+        clientNum:   ap.clientNum,
+        model:       ap.model,
         // fields เพิ่มเติมสำหรับ context
-        building:  ap.building,
-        floor:     ap.floor,
+        building:    ap.building,
+        floor:       ap.floor,
       })),
     },
   });

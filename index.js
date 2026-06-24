@@ -299,9 +299,13 @@ function matchCommand(text) {
   for (const [cmd, keywords] of Object.entries(COMMAND_MAP)) {
     if (keywords.some((kw) => text === kw || text.startsWith(kw + ' '))) return cmd;
   }
-  // Fuzzy: ถ้าข้อความมีคำสำคัญอยู่ด้วย
+  // Fuzzy: คำสำคัญต้องอยู่เป็นคำเต็ม (word boundary) ไม่ใช่ substring
+  // เช่น "ap" ต้องไม่ match "approve" หรือ "map"
   for (const [cmd, keywords] of Object.entries(COMMAND_MAP)) {
-    if (keywords.some((kw) => text.includes(kw))) return cmd;
+    if (keywords.some((kw) => {
+      const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return new RegExp(`(?<![\\w])${escaped}(?![\\w])`, 'i').test(text);
+    })) return cmd;
   }
   return null;
 }
@@ -603,8 +607,8 @@ async function route(text, rawText, userId, replyToken) {
       if (!auth.canExecute(userId, 'wifi')) return reply(replyToken, fmt.buildError('คุณไม่มีสิทธิ์ใช้คำสั่งนี้'));
       if (!omada) return reply(replyToken, fmt.buildError('Omada ยังไม่เปิดใช้งาน'));
       const aps = await omada.getAPs();
-      const wifiOffline = aps.filter((a) => a.available === 2 || a.online === false);
-      const wifiCtxText = `AP ทั้งหมด ${aps.length} เครื่อง ออนไลน์ ${aps.filter((a) => a.available === 1 || a.online).length} ออฟไลน์ ${wifiOffline.length}` +
+      const wifiOffline = aps.filter((a) => a.status !== '🟢 เชื่อมต่อ');
+      const wifiCtxText = `AP ทั้งหมด ${aps.length} เครื่อง เชื่อมต่อ ${aps.filter((a) => a.status === '🟢 เชื่อมต่อ').length} ไม่เชื่อมต่อ ${wifiOffline.length}` +
         (wifiOffline.length > 0 ? `: ${wifiOffline.slice(0, 10).map((a) => a.name).join(', ')}` : '');
       userLastWifiCtx.set(userId, { text: wifiCtxText, setAt: Date.now() });
       return reply(replyToken, fmt.buildHosts(aps, null, 'สถานะ Access Point', '📶', 'วิเคราะห์ wifi'));
