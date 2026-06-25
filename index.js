@@ -500,7 +500,16 @@ async function route(text, rawText, userId, replyToken) {
 
   switch (cmd) {
     case 'help': {
-      return reply(replyToken, fmt.buildHelp());
+      const AUTH_CMD_DEFS = [
+        ['myid',    '🪪 myid',                  'ดู LINE User ID ของคุณ'],
+        ['pending', '⏳ pending',               'ดูคนรออนุมัติ'],
+        ['adduser', '➕ adduser [ID] [ROLE]',   'เพิ่มผู้ใช้'],
+        ['approve', '✅ approve [ID] [ROLE]',   'อนุมัติ + ตั้ง role'],
+      ];
+      const extraCmds = AUTH_CMD_DEFS
+        .filter(([key]) => auth.canExecute(userId, key))
+        .map(([, label, desc]) => [label, desc]);
+      return reply(replyToken, fmt.buildHelp(extraCmds));
     }
 
     case 'alert': {

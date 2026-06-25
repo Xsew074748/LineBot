@@ -89,8 +89,8 @@ function resolveFooter(analysis, analyzeText) {
 }
 
 // ── Help Message ───────────────────────────────────────────────────────────────
-function buildHelp() {
-  const cmds = [
+function buildHelp(extraCmds = []) {
+  const baseCmds = [
     ['📢 alert / แจ้งเตือน',  'Alert จาก Zabbix'],
     ['💻 host / เครื่อง',      'สถานะ Host ทั้งหมด'],
     ['📷 กล้อง / camera',      'สถานะกล้องทั้งหมด'],
@@ -106,20 +106,29 @@ function buildHelp() {
     ['❓ help / ช่วยเหลือ',     'รายการคำสั่ง'],
   ];
 
-  const rows = cmds.flatMap(([cmd, desc], i) => {
-    const row = hbox([
-      txt(cmd,  'xs', COLOR.blue, { weight: 'bold', flex: 4, wrap: true }),
-      txt(desc, 'xs', '#555555',  { flex: 5, wrap: true }),
-    ], { margin: 'sm' });
-    return i === 0 ? [row] : [sep(), row];
-  });
+  const makeRows = (cmds) =>
+    cmds.flatMap(([cmd, desc], i) => {
+      const row = hbox([
+        txt(cmd,  'xs', COLOR.blue, { weight: 'bold', flex: 4, wrap: true }),
+        txt(desc, 'xs', '#555555',  { flex: 5, wrap: true }),
+      ], { margin: 'sm' });
+      return i === 0 ? [row] : [sep(), row];
+    });
+
+  const baseRows = makeRows(baseCmds);
+
+  const authSection = extraCmds.length === 0 ? [] : [
+    sep(),
+    txt('🔐 การจัดการสิทธิ์', 'xs', '#888888', { margin: 'md', weight: 'bold' }),
+    ...makeRows(extraCmds),
+  ];
 
   return bubble(
     vbox(COLOR.blue, [
       txt('🤖 IT Monitor Bot', 'lg', COLOR.white, { weight: 'bold' }),
       txt('รายการคำสั่งทั้งหมด', 'xs', '#CCDDFF', { margin: 'xs' }),
     ]),
-    vbox(COLOR.white, rows, { paddingAll: '12px' })
+    vbox(COLOR.white, [...baseRows, ...authSection], { paddingAll: '12px' })
   );
 }
 

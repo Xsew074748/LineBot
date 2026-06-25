@@ -122,7 +122,7 @@ const COMMAND_PERMISSIONS = {
   removeuser: ROLES.ADMIN,
   listuser:   ROLES.ADMIN,
   approve:    ROLES.ADMIN,
-  pending:    ROLES.ADMIN,
+  pending:    ROLES.IT_STAFF,
   config:     ROLES.ADMIN,
   // คำสั่งทั่วไป: IT_STAFF ขึ้นไป
   alert: ROLES.IT_STAFF,
@@ -137,6 +137,7 @@ const COMMAND_PERMISSIONS = {
   สรุป: ROLES.VIEWER,
   status: ROLES.VIEWER,
   help: ROLES.VIEWER,
+  myid: ROLES.VIEWER,
   // Cross-system correlation
   cross: ROLES.IT_STAFF,
 };
