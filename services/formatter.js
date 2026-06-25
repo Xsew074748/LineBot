@@ -107,13 +107,10 @@ function buildHelp(extraCmds = []) {
   ];
 
   const makeRows = (cmds) =>
-    cmds.flatMap(([cmd, desc], i) => {
-      const row = hbox([
-        txt(cmd,  'xs', COLOR.blue, { weight: 'bold', flex: 4, wrap: true }),
-        txt(desc, 'xs', '#555555',  { flex: 5, wrap: true }),
-      ], { margin: 'sm' });
-      return i === 0 ? [row] : [sep(), row];
-    });
+    cmds.flatMap(([cmd, desc], i) => [
+      txt(cmd,  'xs', COLOR.blue, { weight: 'bold', wrap: true, ...(i > 0 && { margin: 'md' }) }),
+      txt(desc, 'xs', '#555555',  { wrap: true }),
+    ]);
 
   const baseRows = makeRows(baseCmds);
 
