@@ -549,7 +549,11 @@ async function route(text, rawText, userId, replyToken) {
       const hostCtxText = `Host ทั้งหมด ${hosts.length} เครื่อง ออนไลน์ ${hosts.filter((h) => h.available === 1).length} ออฟไลน์ ${hostOffline.length}` +
         (hostOffline.length > 0 ? `: ${hostOffline.slice(0, 10).map((h) => h.name).join(', ')}` : '');
       userLastHostCtx.set(userId, { text: hostCtxText, setAt: Date.now() });
-      return reply(replyToken, fmt.buildHosts(hosts, null, 'สถานะ Host', '💻', 'วิเคราะห์ host'));
+      const hostMsg  = fmt.buildHosts(hosts, null, 'สถานะ Host', '💻', 'วิเคราะห์ host');
+      const safeHost = JSON.stringify(hostMsg).length > 4500
+        ? fmt.buildHosts(hosts.slice(0, 5), null, 'สถานะ Host', '💻', 'วิเคราะห์ host')
+        : hostMsg;
+      return reply(replyToken, safeHost);
     }
 
     case 'camera': {
