@@ -59,11 +59,13 @@ function sanitizeText(text, maxLen = 500) {
 
 // ── Timestamp Validation (Replay Attack Prevention) ───────────────────────────
 // ตรวจสอบว่า timestamp ของ LINE event ไม่เก่าเกิน 5 นาที
+// และยอมรับ clock skew ±30 วิ (นาฬิกาคลายกัน)
 const MAX_TIMESTAMP_AGE_MS = 5 * 60 * 1000;
+const CLOCK_SKEW_MS = 30 * 1000;
 
 function isTimestampFresh(timestampMs) {
   const age = Date.now() - timestampMs;
-  return age >= 0 && age <= MAX_TIMESTAMP_AGE_MS;
+  return age <= MAX_TIMESTAMP_AGE_MS && age >= -CLOCK_SKEW_MS;
 }
 
 module.exports = {

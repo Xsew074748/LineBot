@@ -1,0 +1,27 @@
+# ── Dependencies (rebuilt inside image ด้วย npm ci) ──────
+node_modules
+
+# ── Secrets / Config จริง (inject ผ่าน env_file + volume) ─
+.env
+
+# ── ข้อมูล Runtime (mounted as volume) ───────────────────
+data
+logs
+
+# ── Log files ─────────────────────────────────────────────
+*.log
+npm-debug.log*
+
+# ── Git history ───────────────────────────────────────────
+.git
+.gitignore
+
+# ── Editor / OS ───────────────────────────────────────────
+.claude
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# ── Tests (ไม่ต้องการใน production image) ─────────────────
+tests

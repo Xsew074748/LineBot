@@ -26,7 +26,7 @@ class OmadaAdapter extends BaseMonitorAdapter {
         type:      'ap',
         status:    'problem',
         timestamp: now,
-        ip:        null,
+        ip:        e.ip || null,
         severity:  e.level.includes('วิกฤต') ? 5 : 2,
       }));
     } catch (err) {
@@ -43,7 +43,7 @@ class OmadaAdapter extends BaseMonitorAdapter {
         zone:   'ไม่ระบุ',
         type:   'ap',
         status: ap.isProblem ? 'down' : 'up',
-        ip:     null,
+        ip:     ap.ip || null,
       }));
     } catch (err) {
       logger.error('OmadaAdapter.getDevices', err);

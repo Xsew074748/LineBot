@@ -295,6 +295,42 @@ function processProblems(problems) {
   };
 }
 
+// ── Pagination helpers ────────────────────────────────────────────────────────
+// ใช้ร่วมกันทุกคำสั่งที่แสดงรายการ (host / wifi / alert / กล้อง)
+const LIST_PAGE_SIZE = 8;
+
+function paginate(items, page = 1, pageSize = LIST_PAGE_SIZE) {
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+  const safePage   = Math.min(Math.max(page, 1), totalPages);
+  return {
+    items:      items.slice((safePage - 1) * pageSize, safePage * pageSize),
+    page:       safePage,
+    totalPages,
+    hasNext:    safePage < totalPages,
+    hasPrev:    safePage > 1,
+  };
+}
+
+// ปุ่ม Quick Reply เปลี่ยนหน้า — กดแล้วส่ง "<cmdText> <เลขหน้า>" กลับมาเป็นข้อความ
+function pageQR(cmdText, pg) {
+  const items = [];
+  if (pg.hasPrev) items.push({ type: 'action', action: { type: 'message', label: '← หน้าก่อน',   text: `${cmdText} ${pg.page - 1}` } });
+  if (pg.hasNext) items.push({ type: 'action', action: { type: 'message', label: 'หน้าถัดไป →', text: `${cmdText} ${pg.page + 1}` } });
+  return items;
+}
+
+// เลขหน้าจากท้ายข้อความ เช่น "host 2" → 2 (ไม่มีเลข = หน้า 1)
+function parsePage(text) {
+  const m = text.match(/(\d+)\s*$/);
+  return m ? parseInt(m[1], 10) : 1;
+}
+
+// LINE Flex bubble จำกัด JSON 10KB — กันชนที่ 9000 bytes
+// นับ byte ไม่ใช่ char เพราะภาษาไทยกิน 3 bytes/ตัวอักษรใน UTF-8
+// (guard เดิม 4500 chars ตัดหน้า 8 รายการเหลือ 5 ทุกครั้ง ทำให้รายการ 6-8 ไม่มีทางแสดง)
+const FLEX_SAFE_BYTES = 9000;
+const flexOversize = (msg) => Buffer.byteLength(JSON.stringify(msg), 'utf8') > FLEX_SAFE_BYTES;
+
 function matchCommand(text) {
   for (const [cmd, keywords] of Object.entries(COMMAND_MAP)) {
     if (keywords.some((kw) => text === kw || text.startsWith(kw + ' '))) return cmd;
@@ -386,16 +422,18 @@ async function route(text, rawText, userId, replyToken) {
   }
 
   // ── changerole:Uxxxxxxx:ROLE — กด Quick Reply จาก manage ────────────────────
-  if (text.startsWith('changerole:')) {
+  // จับทั้ง "changerole" เปล่า ๆ ด้วย — args ไม่ครบต้องตอบ error ไม่ไหลลง AI
+  if (text.startsWith('changerole')) {
     if (!auth.canExecute(userId, 'adduser')) return reply(replyToken, fmt.buildError('คุณไม่มีสิทธิ์ใช้คำสั่งนี้'));
     const targetId = cc(1);
     const role     = cc(2).toUpperCase();
-    if (targetId && role) {
-      const result     = auth.addUser(targetId, role);
-      logger.audit(userId, 'changerole', `target=${targetId} role=${role}`);
-      const targetName = await getDisplayName(targetId);
-      return reply(replyToken, fmt.buildAiResponse(result.ok ? `✅ เปลี่ยน role ${targetName} เป็น ${role} แล้ว` : `❌ ${result.msg}`));
+    if (!targetId || !role) {
+      return reply(replyToken, fmt.buildError('กรุณาระบุ ID และ role ให้ครบ — รูปแบบ: changerole:USER_ID:ROLE'));
     }
+    const result     = auth.addUser(targetId, role);
+    logger.audit(userId, 'changerole', `target=${targetId} role=${role}`);
+    const targetName = await getDisplayName(targetId);
+    return reply(replyToken, fmt.buildAiResponse(result.ok ? `✅ เปลี่ยน role ${targetName} เป็น ${role} แล้ว` : `❌ ${result.msg}`));
   }
 
   if (text === 'pending') {
@@ -525,20 +563,38 @@ async function route(text, rawText, userId, replyToken) {
       }
 
       const problems = await zabbix.getProblems(200);
-      userLastAlertCtx.set(userId, { problems, setAt: Date.now() });
 
-      // Subcommand: แสดง Average / Warning
-      if (['warning', 'average', 'warn', 'avg'].includes(alertSub)) {
+      // Subcommand: แสดง Average / Warning — "alert warning 2" = หน้า 2
+      const warnMatch = alertSub.match(/^(warning|average|warn|avg)(?:\s+(\d+))?$/);
+      if (warnMatch) {
+        userLastAlertCtx.set(userId, { problems, setAt: Date.now() });
         const lowItems = problems.filter((p) => p.priority >= 2 && p.priority <= 3);
-        return reply(replyToken, fmt.buildAlertWarning(lowItems));
+
+        // Pagination: ครั้งละ 8 เหมือนคำสั่งอื่น
+        const pg       = paginate(lowItems, warnMatch[2] ? parseInt(warnMatch[2], 10) : 1);
+        const pageInfo = { page: pg.page, totalPages: pg.totalPages, total: lowItems.length };
+
+        const warnMsg  = fmt.buildAlertWarning(pg.items, pageInfo);
+        const safeWarn = flexOversize(warnMsg)
+          ? fmt.buildAlertWarning(pg.items.slice(0, 5), pageInfo)
+          : warnMsg;
+        return reply(replyToken, safeWarn, pageQR(`alert ${warnMatch[1]}`, pg));
       }
 
+      // Pagination: แบ่งหน้ารายการ Disaster+High ครั้งละ 8 — "alert 2" = หน้า 2
       const processed = processProblems(problems);
-      const msg       = fmt.buildAlerts(processed, null, 'วิเคราะห์ alert');
-      const safeMsg   = JSON.stringify(msg).length > 4500
+      const critical  = problems.filter((p) => p.priority >= 4);
+      const pg        = paginate(critical, parsePage(text));
+      processed.topItems  = pg.items;
+      processed.moreCount = 0;
+      processed.pageInfo  = { page: pg.page, totalPages: pg.totalPages };
+      userLastAlertCtx.set(userId, { problems, page: pg.page, setAt: Date.now() });
+
+      const msg     = fmt.buildAlerts(processed, null, 'วิเคราะห์ alert');
+      const safeMsg = flexOversize(msg)
         ? fmt.buildAlerts({ ...processed, topItems: processed.topItems.slice(0, 5), clusters: [] }, null, 'วิเคราะห์ alert')
         : msg;
-      return reply(replyToken, safeMsg);
+      return reply(replyToken, safeMsg, pageQR('alert', pg));
     }
 
     case 'host': {
@@ -548,43 +604,43 @@ async function route(text, rawText, userId, replyToken) {
       const hostOffline = hosts.filter((h) => h.available !== 1);
       const hostCtxText = `Host ทั้งหมด ${hosts.length} เครื่อง ออนไลน์ ${hosts.filter((h) => h.available === 1).length} ออฟไลน์ ${hostOffline.length}` +
         (hostOffline.length > 0 ? `: ${hostOffline.slice(0, 10).map((h) => h.name).join(', ')}` : '');
-      userLastHostCtx.set(userId, { text: hostCtxText, setAt: Date.now() });
-      const hostMsg  = fmt.buildHosts(hosts, null, 'สถานะ Host', '💻', 'วิเคราะห์ host');
-      const safeHost = JSON.stringify(hostMsg).length > 4500
-        ? fmt.buildHosts(hosts.slice(0, 5), null, 'สถานะ Host', '💻', 'วิเคราะห์ host')
+
+      // Pagination: ครั้งละ 8 — "host 2" = หน้า 2
+      const pg = paginate(hosts, parsePage(text));
+      userLastHostCtx.set(userId, { text: hostCtxText, page: pg.page, setAt: Date.now() });
+
+      const hostTitle = pg.totalPages > 1 ? `สถานะ Host (หน้า ${pg.page}/${pg.totalPages})` : 'สถานะ Host';
+      const hostMsg  = fmt.buildHosts(pg.items, null, hostTitle, '💻', 'วิเคราะห์ host', { statsFrom: hosts });
+      const safeHost = flexOversize(hostMsg)
+        ? fmt.buildHosts(pg.items.slice(0, 5), null, hostTitle, '💻', 'วิเคราะห์ host', { statsFrom: hosts })
         : hostMsg;
-      return reply(replyToken, safeHost);
+      return reply(replyToken, safeHost, pageQR('host', pg));
     }
 
     case 'camera': {
       if (!auth.canExecute(userId, 'กล้อง')) return reply(replyToken, fmt.buildError('คุณไม่มีสิทธิ์ใช้คำสั่งนี้'));
 
-      // ตรวจ subcommand "อาคาร X" เช่น "กล้อง อาคาร A" หรือ "กล้อง อาคาร B 2"
-      const bldMatch = text.match(/อาคาร\s*([a-e])/i);
-      if (bldMatch) {
-        const building = bldMatch[1].toUpperCase();
-        const pageNum  = parseInt((text.match(/\d+/) || ['1'])[0], 10);
-        const cameras  = await getCamerasWithCache();
-        const bldCams  = cameras.filter(c => String(c.location || '').includes(`อาคาร ${building}`));
-        const bldOff   = bldCams.filter(c => !c.online);
-        userLastCameraCtx.set(userId, {
-          text: `กล้องดับในอาคาร ${building}: ${bldOff.length}/${bldCams.length} ตัว` +
-            (bldOff.length > 0
-              ? '\n' + bldOff.slice(0, 15).map(c => `${c.name}(${c.location}) ดับ ${c.duration}`).join(', ')
-              : ''),
-          setAt: Date.now(),
-        });
-        return reply(replyToken, fmt.buildCameraDetail(bldCams, bldOff, building, pageNum, 'วิเคราะห์กล้อง'));
-      }
-
-      // แสดงสรุปแยกตามอาคาร (default)
       const cameras = await getCamerasWithCache();
-      const offline = cameras.filter(c => !c.online || c.available === 2);
-      userLastCameraCtx.set(userId, {
-        text: `กล้อง CCTV รวม ${cameras.length} ตัว ออนไลน์ ${cameras.length - offline.length} ออฟไลน์ ${offline.length} ตัว`,
-        setAt: Date.now(),
-      });
-      return reply(replyToken, fmt.buildCameraBuildings(cameras, offline, 'วิเคราะห์กล้อง'));
+
+      // รองรับทั้ง shape จาก Zabbix (available) และ HikCentral (online)
+      const cameraOffline = cameras.filter((c) => (c.available !== undefined ? c.available !== 1 : !c.online));
+      const cameraCtxText = `กล้องทั้งหมด ${cameras.length} เครื่อง ปกติ ${cameras.length - cameraOffline.length} มีปัญหา ${cameraOffline.length}` +
+        (cameraOffline.length > 0 ? `: ${cameraOffline.slice(0, 5).map((c) => c.name).join(', ')}` : '');
+
+      // Pagination: ครั้งละ 8 — "กล้อง 2" = หน้า 2
+      const pg = paginate(cameras, parsePage(text));
+      userLastCameraCtx.set(userId, { text: cameraCtxText, page: pg.page, setAt: Date.now() });
+
+      const title = pg.totalPages > 1
+        ? `สถานะกล้อง (หน้า ${pg.page}/${pg.totalPages})`
+        : `สถานะ Hikvision Camera`;
+      const cameraMsg = fmt.buildHosts(pg.items, null, title, '🎥', 'วิเคราะห์กล้อง', { statsFrom: cameras });
+
+      const safeCam = flexOversize(cameraMsg)
+        ? fmt.buildHosts(pg.items.slice(0, 5), null, title, '🎥', 'วิเคราะห์กล้อง', { statsFrom: cameras })
+        : cameraMsg;
+
+      return reply(replyToken, safeCam, pageQR('กล้อง', pg));
     }
 
     case 'cameraOff': {
@@ -623,31 +679,47 @@ async function route(text, rawText, userId, replyToken) {
       const wifiOffline = aps.filter((a) => a.isProblem);
       const wifiCtxText = `AP ทั้งหมด ${aps.length} เครื่อง ปกติ ${aps.filter((a) => !a.isProblem).length} มีปัญหา ${wifiOffline.length}` +
         (wifiOffline.length > 0 ? `: ${wifiOffline.slice(0, 10).map((a) => a.name).join(', ')}` : '');
-      userLastWifiCtx.set(userId, { text: wifiCtxText, setAt: Date.now() });
-      return reply(replyToken, fmt.buildHosts(aps, null, 'สถานะ Access Point', '📶', 'วิเคราะห์ wifi'));
+
+      // Pagination: ครั้งละ 8 — "wifi 2" = หน้า 2
+      const pg = paginate(aps, parsePage(text));
+      userLastWifiCtx.set(userId, { text: wifiCtxText, page: pg.page, setAt: Date.now() });
+
+      const wifiTitle = pg.totalPages > 1 ? `สถานะ Access Point (หน้า ${pg.page}/${pg.totalPages})` : 'สถานะ Access Point';
+      const wifiMsg  = fmt.buildHosts(pg.items, null, wifiTitle, '📶', 'วิเคราะห์ wifi', { statsFrom: aps });
+      const safeWifi = flexOversize(wifiMsg)
+        ? fmt.buildHosts(pg.items.slice(0, 5), null, wifiTitle, '📶', 'วิเคราะห์ wifi', { statsFrom: aps })
+        : wifiMsg;
+      return reply(replyToken, safeWifi, pageQR('wifi', pg));
     }
 
     case 'client': {
       if (!auth.canExecute(userId, 'client')) return reply(replyToken, fmt.buildError('คุณไม่มีสิทธิ์ใช้คำสั่งนี้'));
       if (!omada) return reply(replyToken, fmt.buildError('Omada ยังไม่เปิดใช้งาน'));
       const clients = await omada.getClients();
+      if (clients.unavailable) {
+        return reply(replyToken, fmt.buildError('ดึงข้อมูล Client จาก Omada ไม่ได้ชั่วคราว ลองใหม่อีกครั้ง'));
+      }
       return reply(replyToken, fmt.buildAiResponse(
         `👥 Client ที่เชื่อมต่ออยู่\n📶 Wireless: ${clients.wireless}\n🔌 Wired: ${clients.wired}\n📊 รวม: ${clients.total}`
       ));
     }
 
     case 'summary': {
-      // ดึงข้อมูลจากทุก Monitor พร้อมกัน
-      const [zData, oData, hData] = await Promise.allSettled([
+      // ดึงข้อมูลจากทุก Monitor พร้อมกัน — แยก getClients ออกจาก Promise.all
+      // เพื่อไม่ให้ Omada /clients fail ทำให้ AP fail ตามไปด้วย
+      const [zData, apsResult, clientsResult, hData] = await Promise.allSettled([
         zabbix     ? zabbix.getSummary()         : Promise.resolve(null),
-        omada      ? Promise.all([omada.getAPs(), omada.getClients()]) : Promise.resolve(null),
+        omada      ? omada.getAPs()              : Promise.resolve(null),
+        omada      ? omada.getClients()          : Promise.resolve(null),
         hikcentral ? hikcentral.getCameras()     : Promise.resolve(null),
       ]);
 
       const allData = {
         zabbix: zData.status === 'fulfilled' ? zData.value : null,
-        omada:  oData.status === 'fulfilled' && oData.value
-          ? { aps: oData.value[0], clients: oData.value[1] } : null,
+        omada: {
+          aps:     apsResult.status === 'fulfilled' ? (apsResult.value || null) : null,
+          clients: clientsResult.status === 'fulfilled' ? (clientsResult.value || null) : null,
+        },
         hik:    hData.status === 'fulfilled' ? { cameras: hData.value } : null,
       };
 
@@ -660,7 +732,8 @@ async function route(text, rawText, userId, replyToken) {
         o.aps     ? `WiFi: ${o.aps.length} APs, ${o.clients?.total || 0} clients` : null,
       ].filter(Boolean).join('. ');
       userLastSummaryCtx.set(userId, { text: summaryCtxText, setAt: Date.now() });
-      return reply(replyToken, fmt.buildSummary(allData, null, 'วิเคราะห์ summary'));
+      const msg = fmt.buildSummary(allData, null, 'วิเคราะห์ summary');
+      return reply(replyToken, msg);
     }
 
     case 'status': {
@@ -796,7 +869,7 @@ function roleQR(targetId, action) {
 
 // ── Reply ไปยัง LINE ──────────────────────────────────────────────────────────
 const ALT_TEXT       = 'IT Monitor Bot';
-const PAYLOAD_LIMIT  = 4500; // ตัวอักษร (กันชน 5000 ของ LINE)
+const PAYLOAD_LIMIT  = 9500; // ตัวอักษร (LINE Flex bubble จำกัด JSON 10KB — ดู FLEX_SAFE_BYTES)
 
 // extraQR: array ของ quick reply items เพิ่มเติม (เช่น ปุ่ม AI)
 async function reply(replyToken, flexContents, extraQR = []) {
@@ -811,7 +884,7 @@ async function reply(replyToken, flexContents, extraQR = []) {
   };
 
   const payloadJson = JSON.stringify(payload);
-  logger.info(`reply: payload size=${payloadJson.length} chars`);
+  logger.info(`reply: payload ${payloadJson.length} chars / ${Buffer.byteLength(payloadJson, 'utf8')} bytes`);
   if (payloadJson.length > PAYLOAD_LIMIT) {
     logger.warn(`reply: payload เกิน ${PAYLOAD_LIMIT} chars (${payloadJson.length})`);
   }
@@ -820,6 +893,7 @@ async function reply(replyToken, flexContents, extraQR = []) {
     await lineClient.replyMessage(payload);
   } catch (err) {
     logger.warn(`reply: ล้มเหลวครั้งแรก (${err.message}) — retrying without quickReply`);
+    if (err.body) logger.warn(`reply: LINE error body=${err.body}`);
     try {
       await lineClient.replyMessage({
         replyToken,
@@ -827,6 +901,7 @@ async function reply(replyToken, flexContents, extraQR = []) {
       });
     } catch (err2) {
       logger.error('reply: ล้มเหลวทั้ง 2 ครั้ง', err2);
+      if (err2.body) logger.error(`reply: LINE error body=${err2.body}`);
     }
   }
 }

@@ -52,7 +52,7 @@ class ZabbixAdapter extends BaseMonitorAdapter {
         type:      typeFromName(p.host),
         status:    'problem',
         timestamp: p.lastchangeTs,
-        ip:        null,
+        ip:        p.interfaces?.[0]?.ip || null,
         severity:  p.priority,
       }));
     } catch (err) {
@@ -69,7 +69,7 @@ class ZabbixAdapter extends BaseMonitorAdapter {
         zone:   extractZone(h.name),
         type:   typeFromGroups(h.groups),
         status: h.available === 1 ? 'up' : 'down',
-        ip:     null,
+        ip:     h.interfaces?.[0]?.ip || null,
       }));
     } catch (err) {
       logger.error('ZabbixAdapter.getDevices', err);

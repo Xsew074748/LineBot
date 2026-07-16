@@ -184,6 +184,7 @@ async function getAPs(siteId = SITE_ID) {
     return {
       name:      ap.name,
       mac:       ap.mac,
+      ip:        ap.ip || null,
       status:    connStatus,
       health:    healthLabel(ap.healthScore),
       clients:   ap.clientNum || 0,
@@ -196,8 +197,16 @@ async function getAPs(siteId = SITE_ID) {
 }
 
 // ── ดึง Client ที่เชื่อมต่อ WiFi ─────────────────────────────────────────────
+// controller รุ่นนี้บังคับ filters.active=true — ไม่ส่งจะคืน errorCode=-1 "General error."
+// ถ้าล้มเหลวคืนค่าเปล่า (unavailable) แทน throw เพื่อไม่ให้คำสั่ง client/summary พังทั้งหมด
 async function getClients(siteId = SITE_ID) {
-  const result = await omadaSiteGet(siteId, 'clients?currentPage=1&currentPageSize=1000');
+  let result = null;
+  try {
+    result = await omadaSiteGet(siteId, 'clients?currentPage=1&currentPageSize=100&filters.active=true');
+  } catch (err) {
+    logger.warn(`omada: getClients ล้มเหลว: ${err.message}`);
+    return { total: 0, wireless: 0, wired: 0, unavailable: true };
+  }
   const data  = Array.isArray(result) ? result : (result?.data  || []);
   const total = Array.isArray(result) ? result.length : (result?.totalRows || 0);
   return {

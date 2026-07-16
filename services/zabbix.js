@@ -93,7 +93,8 @@ async function getHosts(limit = 100) {
     available: parseInt(h.available, 10),
     status:    AVAIL[parseInt(h.available, 10)] || '❓',
     groups:    h.groups?.map((g) => g.name).join(', ') || '',
-    // ไม่แสดง IP เต็มใน LINE ใช้ชื่อ host แทน (ตาม Security requirement)
+    // ส่ง interfaces ให้ adapter/MCP และ formatter ใช้อ่าน IP (แสดงต่อท้ายชื่อใน Flex)
+    interfaces: h.interfaces || [],
   }));
 }
 
