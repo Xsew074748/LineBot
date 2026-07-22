@@ -7,6 +7,8 @@ const auth       = require('../middleware/setupAuth');
 // testConnection: ฟังก์ชัน test ของ Omada — ใช้ flow เดียวกับ service จริง
 // (GET /api/info → POST /{omadacId}/api/v2/login) + httpsAgent เดียวกัน
 const { testConnection: omadaTestConn } = require('../services/omada');
+// healthCheck: ทดสอบ HikCentral ด้วย AK/SK signature flow เดียวกับ service จริง
+const hik = require('../services/hikcentral');
 
 const router   = express.Router();
 const ENV_PATH = path.join(__dirname, '..', '.env');
@@ -196,16 +198,9 @@ router.post('/test', async (req, res) => {
     }
 
     if (svc === 'hikcentral') {
-      const url    = get('url', 'HIKCENTRAL_URL');
-      const id     = get('clientId', 'HIKCENTRAL_CLIENT_ID');
-      const secret = get('clientSecret', 'HIKCENTRAL_CLIENT_SECRET');
-      if (!url || !id || !secret) return res.json({ ok: false, message: 'กรุณากรอก URL, Client ID และ Secret' });
-      const r = await axios.post(`${url.replace(/\/$/, '')}/api/v1/oauth/token`,
-        new URLSearchParams({ grant_type: 'client_credentials', client_id: id, client_secret: secret }),
-        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 6000 }
-      );
-      const ok = !!r.data?.access_token;
-      return res.json({ ok, message: ok ? '✅ เชื่อมต่อ HikCentral สำเร็จ' : 'ไม่ได้รับ access_token' });
+      // ทดสอบด้วยค่าใน .env ปัจจุบัน (service อ่าน HIKCENTRAL_URL/APP_KEY/APP_SECRET ตอนโหลดโมดูล)
+      const r = await hik.healthCheck();
+      return res.json({ ok: r.ok, message: r.ok ? '✅ เชื่อมต่อ HikCentral สำเร็จ' : (r.error || 'เชื่อมต่อไม่สำเร็จ') });
     }
 
     if (svc === 'claude') {

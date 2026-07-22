@@ -5,10 +5,11 @@ const https = require('https');
 const axios = require('axios');
 const logger = require('./logger');
 
-const BASE_URL = process.env.OMADA_URL      || '';
-const USERNAME  = process.env.OMADA_USERNAME || '';
-const PASSWORD  = process.env.OMADA_PASSWORD || '';
-const SITE_ID   = process.env.OMADA_SITE_ID  || '';
+const BASE_URL     = process.env.OMADA_URL           || '';
+const OMADAC_ID     = process.env.OMADA_OMADAC_ID     || '';
+const SITE_ID       = process.env.OMADA_SITE_ID       || '';
+const CLIENT_ID     = process.env.OMADA_CLIENT_ID     || '';
+const CLIENT_SECRET = process.env.OMADA_CLIENT_SECRET || '';
 const CA_PATH        = process.env.OMADA_CA_CERT_PATH     || '';
 // ตั้ง OMADA_TLS_SKIP_HOSTNAME=true เมื่อ cert ใช้ CN แทน SAN (ERR_TLS_CERT_ALTNAME_INVALID)
 // ยัง verify chain อยู่ เพียงข้ามการเช็คชื่อ/IP เท่านั้น — ใช้คู่กับ CA_PATH เท่านั้น
@@ -40,77 +41,51 @@ function buildHttpsAgent() {
 // ── Axios Instance — httpsAgent ฝังอยู่ใน instance ป้องกันลืมแนบรายตัว ────────
 const omadaHttp = axios.create({ httpsAgent: buildHttpsAgent(), timeout: 10_000 });
 
-// ── Token + Controller ID + Session Cookie ────────────────────────────────────
-let authToken    = null;
-let tokenExpAt   = 0;          // Unix ms
-let omadacId     = null;       // cache จาก /api/info (stable ตลอดอายุ controller)
-let sessionCookie = null;      // Set-Cookie จาก login — ต้องส่งคู่กับ Csrf-Token ทุก request
+// ── OAuth2 Client Credentials (Omada Open API) ────────────────────────────────
+let accessToken = null;
+let tokenExpAt  = 0; // Unix ms
 
-// ── Discovery: GET /api/info → omadacId ───────────────────────────────────────
-async function fetchOmadacId() {
-  const resp = await omadaHttp.get(`${BASE_URL}/api/info`);
-  const id   = resp.data?.result?.omadacId || resp.data?.result?.controllerId;
-  if (!id) throw new Error('Omada: /api/info ไม่คืน omadacId — ตรวจ URL อีกครั้ง');
-  return id;
-}
-
-// ── Login (2-step: /api/info → /{omadacId}/api/v2/login) ─────────────────────
-async function login() {
+// POST /openapi/authorize/token?grant_type=client_credentials
+async function fetchToken() {
   const start = Date.now();
   try {
-    if (!omadacId) omadacId = await fetchOmadacId();
     const resp = await omadaHttp.post(
-      `${BASE_URL}/${omadacId}/api/v2/login`,
-      { username: USERNAME, password: PASSWORD }
+      `${BASE_URL}/openapi/authorize/token?grant_type=client_credentials`,
+      { omadacId: OMADAC_ID, client_id: CLIENT_ID, client_secret: CLIENT_SECRET }
     );
-    logger.apiCall('Omada', 'login', Date.now() - start);
+    logger.apiCall('Omada', 'authorize/token', Date.now() - start);
 
-    const data = resp.data;
-    if (data.errorCode !== 0) throw new Error(`Omada login failed: ${data.msg}`);
+    const body = resp.data;
+    if (body.errorCode !== 0) throw new Error(`Omada token failed [${body.errorCode}]: ${body.msg}`);
 
-    authToken  = data.result?.token;
-    tokenExpAt = Date.now() + 23 * 60 * 60 * 1000;
-    // เก็บ session cookie ที่ controller set — ต้องแนบทุก request หลังนี้
-    // controller ตรวจทั้ง Csrf-Token + cookie คู่กัน ขาดอย่างใดอย่างหนึ่งคืน HTML
-    const setCookies = resp.headers['set-cookie'] || [];
-    sessionCookie = setCookies.map((c) => c.split(';')[0]).join('; ');
-    logger.info(`omada: login สำเร็จ cookie=${sessionCookie.slice(0, 60)}…`);
-    return authToken;
+    const { accessToken: token, expiresIn } = body.result || {};
+    if (!token) throw new Error('Omada: /authorize/token ไม่คืน accessToken');
+
+    accessToken = token;
+    tokenExpAt  = Date.now() + (Number(expiresIn) > 0 ? Number(expiresIn) * 1000 : 2 * 60 * 60 * 1000);
+    logger.info(`omada: ออก access token สำเร็จ (หมดอายุใน ${expiresIn ?? '?'}s)`);
+    return accessToken;
   } catch (err) {
-    logger.apiCall('Omada', 'login', Date.now() - start, false);
+    logger.apiCall('Omada', 'authorize/token', Date.now() - start, false);
     throw err;
   }
 }
 
-// ── ตรวจสอบ Token ก่อนทุก request ────────────────────────────────────────────
+// เรียกก่อนทุก request — ออก token ใหม่เมื่อยังไม่มี หรือใกล้หมดอายุ (< 5 นาที)
 async function getToken() {
-  if (!authToken || Date.now() >= tokenExpAt) await login();
-  return authToken;
+  if (!accessToken || Date.now() >= tokenExpAt - 5 * 60 * 1000) await fetchToken();
+  return accessToken;
 }
 
-// ── GET helper (low-level) — รับ absolute path ────────────────────────────────
+// ── GET helper (low-level) — รับ absolute path, แนบ AccessToken header ────────
 async function omadaGet(path, retried = false) {
   const token = await getToken();
   const start = Date.now();
   try {
     const resp = await omadaHttp.get(`${BASE_URL}${path}`, {
-      headers: {
-        'Csrf-Token': token,
-        // cookie ต้องส่งคู่กับ Csrf-Token — ขาด cookie controller คืน HTML แทน JSON
-        ...(sessionCookie ? { Cookie: sessionCookie } : {}),
-      },
+      headers: { Authorization: `AccessToken=${token}` },
     });
-    const raw = resp.data;
-
-    // Omada คืน HTTP 200 + HTML login page เมื่อ session/cookie หมด (ไม่ใช่ 401)
-    // ตรวจก่อน log OK และก่อน JSON.parse เพื่อกัน SyntaxError และให้ retry ทำงานได้
-    if (typeof raw === 'string' && raw.trimStart().startsWith('<')) {
-      const e = new Error('Omada session expired (HTML response received)');
-      e._htmlSession = true;
-      throw e;
-    }
-
-    const body = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    const body = resp.data;
     if (body.errorCode !== 0) {
       const msg = body.msg || body.message || 'unknown error';
       logger.warn(`omada: errorCode=${body.errorCode} msg="${msg}" path=${path}`);
@@ -120,95 +95,51 @@ async function omadaGet(path, retried = false) {
     return body.result;
   } catch (err) {
     logger.apiCall('Omada', path, Date.now() - start, false);
-    // รวม 2 เคส session หมด: HTTP 401 และ HTTP 200 + HTML (Omada redirect ไป login page)
-    if (err.response?.status === 401 || err._htmlSession) {
-      if (retried) throw new Error('Omada session expired — ยังคืน HTML หลัง re-login แล้ว');
-      authToken     = null;
-      sessionCookie = null;
+    // token หมดอายุ/ถูก revoke เร็วกว่าที่คำนวณไว้ — ออกใหม่แล้ว retry 1 ครั้ง
+    if (err.response?.status === 401 && !retried) {
+      accessToken = null;
       return omadaGet(path, true);
     }
     throw err;
   }
 }
 
-// ── GET helper สำหรับ site-level endpoint ─────────────────────────────────────
-// ประกอบ path /{omadacId}/api/v2/sites/{siteId}/{resource} อัตโนมัติ
-// แก้ที่นี่จุดเดียว ทุกฟังก์ชันได้ path ถูกต้องทันที
-async function omadaSiteGet(siteId, resource) {
-  if (!omadacId) omadacId = await fetchOmadacId();
-  return omadaGet(`/${omadacId}/api/v2/sites/${siteId}/${resource}`);
+function extractList(result) {
+  return Array.isArray(result) ? result : (result?.data || []);
 }
 
 // ── ดึง Access Points ─────────────────────────────────────────────────────────
-// /devices คืน AP + Switch + Gateway รวมกัน — filter เฉพาะ AP
-// ค่า type จริงรอยืนยันจาก device จริง: log ด้านล่างจะแสดงทันทีที่มีอุปกรณ์
-function isAP(d) {
-  const t = d.type;
-  // รองรับทั้ง number (0) และ string ('ap', 'eap', 'AP') — ยืนยันค่าจริงจาก log
-  return t === 0 || t === '0' || String(t ?? '').toLowerCase().includes('ap');
-}
-
+// GET /openapi/v1/{omadacId}/sites/{siteId}/devices — คืน AP + Switch + Gateway รวมกัน
 async function getAPs(siteId = SITE_ID) {
-  const result = await omadaSiteGet(siteId, 'devices');
-  const all    = Array.isArray(result) ? result : (result?.data || []);
-
-  const aps = all.filter(isAP);
+  const result = await omadaGet(`/openapi/v1/${OMADAC_ID}/sites/${siteId}/devices?pageSize=100&page=1`);
+  const all    = extractList(result);
+  const aps    = all.filter((d) => d.type === 'ap');
 
   if (all.length > 0 && aps.length === 0) {
-    logger.warn(`omada: getAPs กรอง 0 จาก ${all.length} devices — ตรวจ field type ของ device แล้วปรับ isAP()`);
+    logger.warn(`omada: getAPs กรอง 0 จาก ${all.length} devices — ตรวจ field type ของ device จริงแล้วปรับ filter`);
   }
 
-  const CONNECTION_STATUS = {
-    0:  '🔴 ไม่เชื่อมต่อ',
-    1:  '🔵 กำลังผูกอุปกรณ์',
-    2:  '🔵 กำลังตั้งค่า',
-    3:  '🟡 รอตอบรับ',
-    4:  '🔵 กำลังอัปเดต',
-    5:  '🔵 กำลังรีบูต',
-    7:  '🔴 ตั้งค่าล้มเหลว',
-    10: '🔴 ถูกปฏิเสธ',
-    14: '🟢 เชื่อมต่อ',
-  };
-
-  function healthLabel(score) {
-    if (score === -1)              return 'No Data';
-    if (score >= 8 && score <= 10) return '🟢 ดีเยี่ยม';
-    if (score >= 4 && score <= 7)  return '🟡 ปานกลาง';
-    if (score >= 1 && score <= 3)  return '🔴 แย่';
-    if (score === 0)               return '🔴 แย่มาก';
-    return `health=${score}`;
-  }
-
-  return aps.map((ap) => {
-    const connStatus = CONNECTION_STATUS[ap.status] ?? `⚪ status=${ap.status}`;
-    return {
-      name:      ap.name,
-      mac:       ap.mac,
-      ip:        ap.ip || null,
-      status:    connStatus,
-      health:    healthLabel(ap.healthScore),
-      clients:   ap.clientNum || 0,
-      model:     ap.model || 'N/A',
-      // true เฉพาะ state ที่เป็นปัญหาจริง (0=ไม่เชื่อมต่อ, 7=ตั้งค่าล้มเหลว, 10=ถูกปฏิเสธ)
-      // transient (1/2/3/4/5) และ connected (14) = false — ไม่นับ offline
-      isProblem: [0, 7, 10].includes(ap.status),
-    };
-  });
+  return aps.map((ap) => ({
+    name:   ap.name,
+    ip:     ap.ip,
+    status: ap.status === 1 ? 'up' : 'down',
+    mac:    ap.mac,
+    model:  ap.model,
+  }));
 }
 
-// ── ดึง Client ที่เชื่อมต่อ WiFi ─────────────────────────────────────────────
-// controller รุ่นนี้บังคับ filters.active=true — ไม่ส่งจะคืน errorCode=-1 "General error."
+// ── ดึง Client ที่เชื่อมต่อ ────────────────────────────────────────────────────
 // ถ้าล้มเหลวคืนค่าเปล่า (unavailable) แทน throw เพื่อไม่ให้คำสั่ง client/summary พังทั้งหมด
 async function getClients(siteId = SITE_ID) {
   let result = null;
   try {
-    result = await omadaSiteGet(siteId, 'clients?currentPage=1&currentPageSize=100&filters.active=true');
+    result = await omadaGet(`/openapi/v1/${OMADAC_ID}/sites/${siteId}/clients?pageSize=100&page=1`);
   } catch (err) {
     logger.warn(`omada: getClients ล้มเหลว: ${err.message}`);
     return { total: 0, wireless: 0, wired: 0, unavailable: true };
   }
-  const data  = Array.isArray(result) ? result : (result?.data  || []);
-  const total = Array.isArray(result) ? result.length : (result?.totalRows || 0);
+  const data  = extractList(result);
+  const total = Array.isArray(result) ? result.length : (result?.totalRows ?? data.length);
   return {
     total,
     wireless: data.filter((c) =>  c.wireless).length,
@@ -217,48 +148,49 @@ async function getClients(siteId = SITE_ID) {
 }
 
 // ── ดึง Alert ─────────────────────────────────────────────────────────────────
-// response: result = { totalRows, data: [...] } — อ่าน result.data
+// หมายเหตุ: path นี้ไม่ได้อยู่ใน scope endpoint ที่ยืนยันแล้ว (sites/devices/clients เท่านั้น)
+// ยังไม่ได้ทดสอบกับ controller จริง — กัน error ด้วย fallback คืน [] แทน throw
+// เพื่อไม่ให้ adapters/omada.js (getProblems) พังทั้งหมด จนกว่าจะยืนยัน endpoint จริง
 async function getAlerts(siteId = SITE_ID) {
-  const result = await omadaSiteGet(siteId, 'events?currentPage=1&currentPageSize=10');
-  return (result?.data || []).map((e) => ({
-    name:   e.name || 'N/A',
-    time:   e.time ? new Date(e.time).toLocaleString('th-TH') : 'N/A',
-    level:  e.level === 0 ? '⚠️ เตือน' : '🔴 วิกฤต',
-  }));
+  try {
+    const result = await omadaGet(`/openapi/v1/${OMADAC_ID}/sites/${siteId}/alerts?pageSize=10&page=1`);
+    return extractList(result).map((e) => ({
+      name:  e.name || e.msg || 'N/A',
+      time:  e.time ? new Date(e.time).toLocaleString('th-TH') : 'N/A',
+      level: e.level === 0 ? '⚠️ เตือน' : '🔴 วิกฤต',
+    }));
+  } catch (err) {
+    logger.warn(`omada: getAlerts ล้มเหลว (endpoint ยังไม่ยืนยัน): ${err.message}`);
+    return [];
+  }
 }
 
-// ── Health Check ───────────────────────────────────────────────────────────────
+// ── Health Check — GET /sites แล้วดู errorCode === 0 (omadaGet throw ถ้าไม่ใช่ 0) ──
 async function healthCheck() {
   try {
-    await login();
+    await omadaGet(`/openapi/v1/${OMADAC_ID}/sites?pageSize=10&page=1`);
     return { ok: true, name: 'Omada WiFi' };
   } catch (err) {
     return { ok: false, name: 'Omada WiFi', error: err.message };
   }
 }
 
-// ── Test Connection — รับ credentials จาก caller แทน env ─────────────────────
-// ใช้ใน Setup UI (routes/config.js) เพื่อทดสอบก่อนบันทึก
-// คืน { ok, message } — single source of truth กับ login()
-async function testConnection(baseUrl, username, password) {
-  const url = (baseUrl || '').replace(/\/$/, '');
+// ── Test Connection — ใช้ใน Setup UI (routes/config.js) ก่อนบันทึกค่า ─────────
+// หมายเหตุ: Open API ใช้ client_id/client_secret จาก .env เท่านั้น (ไม่ใช่ username/password
+// ที่ route ยังส่งมา) — พารามิเตอร์ username/password จึงไม่ถูกใช้แล้ว คงไว้เพื่อไม่ต้องแก้ signature
+async function testConnection(baseUrl /*, username, password */) {
+  const url = (baseUrl || BASE_URL || '').replace(/\/$/, '');
   try {
-    // Step 1: ดึง omadacId
-    const infoResp = await omadaHttp.get(`${url}/api/info`, { timeout: 6000 });
-    const cId = infoResp.data?.result?.omadacId || infoResp.data?.result?.controllerId;
-    if (!cId) return { ok: false, message: '/api/info ไม่คืน omadacId — ตรวจ URL และ port' };
-
-    // Step 2: login ด้วย credentials ที่รับมา
-    const loginResp = await omadaHttp.post(
-      `${url}/${cId}/api/v2/login`,
-      { username, password },
+    const resp = await omadaHttp.post(
+      `${url}/openapi/authorize/token?grant_type=client_credentials`,
+      { omadacId: OMADAC_ID, client_id: CLIENT_ID, client_secret: CLIENT_SECRET },
       { timeout: 6000 }
     );
-    const data = loginResp.data;
-    if (data.errorCode !== 0) {
-      return { ok: false, message: `Auth ล้มเหลว: ${data.msg || 'username/password ผิด'}` };
+    const body = resp.data;
+    if (body.errorCode !== 0) {
+      return { ok: false, message: `Auth ล้มเหลว [${body.errorCode}]: ${body.msg || 'client_id/client_secret ผิด'}` };
     }
-    return { ok: true, message: `✅ เชื่อมต่อ Omada สำเร็จ (omadacId: ${cId})` };
+    return { ok: true, message: '✅ เชื่อมต่อ Omada (Open API) สำเร็จ' };
   } catch (err) {
     if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') {
       return { ok: false, message: `ต่อไม่ติด: ตรวจ URL และ port (${err.code})` };
@@ -271,4 +203,4 @@ async function testConnection(baseUrl, username, password) {
 }
 
 // http: axios instance ที่ฝัง httpsAgent ไว้แล้ว — ใช้ได้จากภายนอก (เช่น routes/config.js)
-module.exports = { login, getAPs, getClients, getAlerts, healthCheck, testConnection, http: omadaHttp };
+module.exports = { getToken, getAPs, getClients, getAlerts, healthCheck, testConnection, http: omadaHttp };

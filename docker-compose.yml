@@ -1,20 +1,21 @@
 services:
 
   # ── IT Monitor Bot ──────────────────────────────────────
-  bot:
+  line-bot:
     build: .
     container_name: it-monitor-bot
     restart: always
 
+    # ภายนอก 3100 → ภายใน container 3000 (PORT ใน .env)
     ports:
-      - "3000:3000"
+      - "3100:3000"
 
     # โหลด .env จากไฟล์ (ไม่ hardcode ค่าใน compose)
     env_file:
       - .env
 
     volumes:
-      # ข้อมูล Runtime — เก็บถาวรนอก container
+      # ข้อมูล Runtime — เก็บถาวรนอก container (users.json, notified_alerts.json)
       - ./data:/app/data
       # Log files
       - ./logs:/app/logs
@@ -25,34 +26,28 @@ services:
       # ถ้าใช้: uncomment แล้วตั้ง OMADA_CA_CERT_PATH=/certs/omada-ca.crt ใน .env
       # - ./certs:/certs:ro
 
-    # รอให้ network พร้อมก่อน (ไม่รอ cloudflared เพราะ bot ไม่ต้องการ)
-    depends_on: []
-
     networks:
       - bot-net
 
-  # ── Cloudflare Tunnel (Phase 2 — ยังไม่เปิดใช้) ──────────
-  # เปิดใช้เมื่อ Docker bot ทำงานได้ปกติแล้ว และพร้อมเลิก PM2
-  #
-  # วิธีเปิดใช้:
-  #   1. ไปที่ https://one.dash.cloudflare.com/ > Zero Trust > Tunnels
-  #   2. สร้าง Tunnel ใหม่ > เลือก Docker > Copy token
-  #   3. ใส่ใน .env: CLOUDFLARE_TUNNEL_TOKEN=<token>
-  #   4. ตั้ง Public Hostname ชี้ไป http://bot:3000
-  #   5. ปิด cloudflared ที่รันบน Windows (Task Scheduler) ก่อน
-  #   6. Uncomment บล็อก cloudflared ด้านล่าง แล้วรัน: docker compose up -d
-  #
-  # cloudflared:
-  #   image: cloudflare/cloudflared:latest
-  #   container_name: it-monitor-cloudflared
-  #   restart: always
-  #   command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
-  #   environment:
-  #     - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
-  #   depends_on:
-  #     - bot
-  #   networks:
-  #     - bot-net
+  # ── Cloudflare Tunnel ────────────────────────────────────
+  # ⚠️ ก่อน docker compose up ครั้งแรก:
+  #   1. ปิด cloudflared ที่รันบน Windows (Task Scheduler) ก่อน — ห้ามรัน 2 ตัวพร้อมกัน
+  #   2. แก้ C:\Users\phatt\.cloudflared\config.yml:
+  #      - ingress service:     http://localhost:3000 → http://line-bot:3000
+  #      - credentials-file:    C:\Users\phatt\... → /etc/cloudflared/<tunnel-id>.json
+  #        (path ใน container — mount แบบ read-only ด้านล่าง)
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: it-monitor-cloudflared
+    restart: always
+    depends_on:
+      - line-bot
+    volumes:
+      - C:/Users/phatt/.cloudflared:/etc/cloudflared:ro
+    # ใช้ tunnel id จาก config.yml โดยตรง (ไม่ระบุชื่อ กัน name mismatch)
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    networks:
+      - bot-net
 
 networks:
   bot-net:

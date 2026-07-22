@@ -170,8 +170,11 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
 //   หรือ Actions > Operations > Message > (custom HTTP header)
 app.post('/zabbix-webhook', express.json({ limit: '10kb' }), async (req, res) => {
   const secret = process.env.ZABBIX_WEBHOOK_SECRET;
-  if (!secret || req.headers['x-zabbix-secret'] !== secret) {
-    return res.sendStatus(401);
+  // timingSafeEqual บังคับให้ทั้งสอง buffer ยาวเท่ากัน — ตรวจก่อนเรียกเสมอ
+  const given    = Buffer.from(String(req.headers['x-zabbix-secret'] || ''));
+  const expected = Buffer.from(secret || '');
+  if (!secret || given.length !== expected.length || !crypto.timingSafeEqual(given, expected)) {
+    return res.status(401).json({ error: 'Unauthorized' });
   }
   res.sendStatus(200);
   try {
@@ -183,8 +186,13 @@ app.post('/zabbix-webhook', express.json({ limit: '10kb' }), async (req, res) =>
 
 // ── จัดการ LINE Event ─────────────────────────────────────────────────────────
 async function handleEvent(event) {
+  if (event.source?.type !== 'user') return;
+
+  // Postback (ปุ่ม 🤖 ข้าง device) — แยก handler
+  if (event.type === 'postback') return handlePostback(event);
+
   // รองรับเฉพาะ text message
-  if (event.type !== 'message' || event.source.type !== 'user') return;
+  if (event.type !== 'message') return;
 
   const userId    = event.source.userId;
   const replyToken = event.replyToken;
@@ -228,6 +236,155 @@ async function handleEvent(event) {
     logger.error(`handleEvent: userId=${userId}`, err);
     await reply(replyToken, fmt.buildError('เกิดข้อผิดพลาดที่ไม่คาดคิด'));
   }
+}
+
+// ── Postback Handler (ปุ่ม 🤖 — data = "analyze:{type}:{name}:{ip}") ──────────
+async function handlePostback(event) {
+  const userId     = event.source.userId;
+  const replyToken = event.replyToken;
+  const data       = String(event.postback?.data || '');
+
+  if (!validator.isTimestampFresh(event.timestamp)) {
+    logger.warn(`postback: stale event from ${userId}`);
+    return;
+  }
+
+  logger.message(userId, `[postback] ${data}`);
+  auth.registerPending(userId);
+
+  if (!checkUserRateLimit(userId)) {
+    return reply(replyToken, fmt.buildError('คุณส่งคำสั่งเร็วเกินไป กรุณารอ 1 นาทีแล้วลองใหม่'));
+  }
+  if (auth.isPending(userId)) {
+    logger.audit(userId, 'PENDING_BLOCKED', `[postback] ${data.slice(0, 80)}`);
+    return reply(replyToken, fmt.buildAiResponse(
+      '⏳ ระบบสำหรับเจ้าหน้าที่ IT เท่านั้น\n\nกรุณารอ admin อนุมัติก่อนใช้งาน\n\nพิมพ์ "myid" เพื่อดู ID ของคุณ'
+    ));
+  }
+
+  try {
+    if (data.startsWith('analyze:')) return await handleAnalyze(data, userId, replyToken);
+  } catch (err) {
+    logger.error(`handlePostback: userId=${userId}`, err);
+    await reply(replyToken, fmt.buildError('เกิดข้อผิดพลาดที่ไม่คาดคิด'));
+  }
+}
+
+// ── AI วิเคราะห์รายอุปกรณ์ 2 layer — Layer 1 ตัว device, Layer 2 อุปกรณ์รอบข้าง ─
+async function handleAnalyze(data, userId, replyToken) {
+  return withAI(userId, replyToken, async () => {
+    // data = "analyze:{type}:{name}:{ip}" — name อาจมี ":" จึงตัด segment แรก/สุดท้ายออก
+    const parts = data.split(':');
+    const type  = parts[1] || '';
+    const rawIp = parts.length > 3 ? parts[parts.length - 1] : '-';
+    const name  = parts.slice(2, parts.length > 3 ? -1 : undefined).join(':') || '-';
+    const ip    = rawIp && rawIp !== '-' && rawIp !== 'N/A' ? rawIp : null;
+
+    const ctx = await gatherAnalyzeContext(type, name, ip);
+
+    const prompt = `คุณเป็น Network Engineer วิเคราะห์ปัญหาของ ${name} (${type})${ip ? ` IP ${ip}` : ''}
+สถานะ: ${ctx.status}
+
+ข้อมูลอุปกรณ์ในเครือข่ายเดียวกัน:
+AP ที่เกี่ยวข้อง: ${ctx.apContext}
+กล้องที่เกี่ยวข้อง: ${ctx.cameraContext}
+
+วิเคราะห์สาเหตุและแนะนำการแก้ไขเป็นภาษาไทย
+ถ้าหลายอุปกรณ์มีปัญหาพร้อมกัน ให้ระบุว่าน่าจะเป็นปัญหาระดับ network/switch`;
+
+    // 800 tokens — วิเคราะห์รายอุปกรณ์มี context 2 layer คำตอบยาวกว่า chat ปกติ (500)
+    const analysis = await ai.chat(prompt, null, 800);
+    return reply(replyToken, fmt.buildAiResponse(analysis));
+  });
+}
+
+// เทียบ /24 subnet เดียวกัน เช่น 192.168.1.10 กับ 192.168.1.99
+function sameSubnet(a, b) {
+  if (!a || !b) return false;
+  const pa = String(a).split('.');
+  const pb = String(b).split('.');
+  return pa.length === 4 && pb.length === 4 &&
+    pa.slice(0, 3).join('.') === pb.slice(0, 3).join('.');
+}
+
+const camIp      = (c) => c.ip || c.interfaces?.[0]?.ip || null;
+const apHasIssue = (a) => a.isProblem === true || a.status === 'down';
+
+async function gatherAnalyzeContext(type, name, ip) {
+  // Layer 2: ดึง AP (Omada) + กล้อง (HikCentral/Zabbix) พร้อมกัน — ตัวที่ fail ข้าม
+  const [apsR, camsR] = await Promise.allSettled([
+    omada ? omada.getAPs() : Promise.resolve([]),
+    getCamerasWithCache(),
+  ]);
+  const aps  = apsR.status  === 'fulfilled' ? (apsR.value  || []) : [];
+  const cams = camsR.status === 'fulfilled' ? (camsR.value || []) : [];
+
+  const apLine  = (a) => `${a.name} (${a.ip || '-'}) ${apHasIssue(a) ? 'down' : 'up'}`;
+  const camLine = (c) => `${c.name}${camIp(c) ? ` (${camIp(c)})` : ''} ${isCamOnline(c) ? 'ออนไลน์' : 'ออฟไลน์'}`;
+  const fmtList = (arr, mapFn, max = 10) => arr.length
+    ? arr.slice(0, max).map(mapFn).join(', ') + (arr.length > max ? ` … และอีก ${arr.length - max}` : '')
+    : 'ไม่พบ';
+
+  let status        = 'ไม่ทราบ';
+  let apContext     = 'ไม่พบข้อมูล';
+  let cameraContext = 'ไม่พบข้อมูล';
+
+  if (type === 'camera') {
+    const self = cams.find((c) => String(c.name) === name);
+    if (self) status = self.status || (isCamOnline(self) ? 'ออนไลน์' : 'ออฟไลน์');
+
+    // AP ที่ IP ใกล้เคียง (same /24) — ไม่รู้ IP ให้ดู AP ที่มีปัญหาแทน
+    const nearAPs = ip ? aps.filter((a) => sameSubnet(a.ip, ip)) : aps.filter(apHasIssue);
+    apContext = ip
+      ? `subnet เดียวกัน: ${fmtList(nearAPs, apLine)}`
+      : `AP ที่มีปัญหา: ${fmtList(nearAPs, apLine)}`;
+
+    // กล้องอื่นในไซต์เดียวกัน
+    const site      = getCameraSite(name);
+    const siteCams  = cams.filter((c) => String(c.name) !== name && getCameraSite(c.name) === site);
+    const offInSite = siteCams.filter((c) => !isCamOnline(c));
+    cameraContext = `ไซต์ ${site} มี ${siteCams.length} ตัว ออฟไลน์ ${offInSite.length} ตัว — ${fmtList(offInSite, camLine, 8)}`;
+
+  } else if (type === 'ap') {
+    const self = aps.find((a) => String(a.name) === name);
+    if (self) status = apHasIssue(self) ? 'down/มีปัญหา' : 'up';
+
+    // AP อื่นที่มีปัญหา
+    const problemAPs = aps.filter((a) => String(a.name) !== name && apHasIssue(a));
+    apContext = `AP อื่นที่มีปัญหา ${problemAPs.length} ตัว: ${fmtList(problemAPs, apLine)}`;
+
+    // กล้องใน subnet เดียวกัน
+    const nearCams = ip ? cams.filter((c) => sameSubnet(camIp(c), ip)) : [];
+    const offNear  = nearCams.filter((c) => !isCamOnline(c));
+    cameraContext = nearCams.length
+      ? `subnet เดียวกัน ${nearCams.length} ตัว ออฟไลน์ ${offNear.length} ตัว — ${fmtList(offNear, camLine, 8)}`
+      : 'ไม่พบกล้องใน subnet เดียวกัน';
+
+  } else {
+    // host / alert — สถานะจาก Zabbix + อุปกรณ์รอบข้างทั้ง AP และกล้อง
+    if (zabbix) {
+      try {
+        const hosts = await zabbix.getHosts(200);
+        const self  = hosts.find((h) => String(h.name) === name);
+        if (self) status = self.status || 'ไม่ทราบ';
+      } catch { /* ใช้ค่า default */ }
+    }
+    const nearAPs    = ip ? aps.filter((a) => sameSubnet(a.ip, ip)) : [];
+    const problemAPs = aps.filter(apHasIssue);
+    apContext = [
+      nearAPs.length    ? `subnet เดียวกัน: ${fmtList(nearAPs, apLine, 8)}`  : null,
+      problemAPs.length ? `มีปัญหา: ${fmtList(problemAPs, apLine, 8)}`       : null,
+    ].filter(Boolean).join(' | ') || 'ไม่พบ AP ที่เกี่ยวข้อง';
+
+    const nearCams = ip ? cams.filter((c) => sameSubnet(camIp(c), ip)) : [];
+    const offCams  = cams.filter((c) => !isCamOnline(c));
+    cameraContext = [
+      nearCams.length ? `subnet เดียวกัน: ${fmtList(nearCams, camLine, 8)}`               : null,
+      offCams.length  ? `ออฟไลน์ทั้งหมด ${offCams.length} ตัว: ${fmtList(offCams, camLine, 6)}` : null,
+    ].filter(Boolean).join(' | ') || 'ไม่พบกล้องที่เกี่ยวข้อง';
+  }
+
+  return { status, apContext, cameraContext };
 }
 
 // ── Command Router ────────────────────────────────────────────────────────────
@@ -324,6 +481,13 @@ function parsePage(text) {
   const m = text.match(/(\d+)\s*$/);
   return m ? parseInt(m[1], 10) : 1;
 }
+
+// ── Site grouping สำหรับคำสั่ง "กล้อง" 2 ระดับ ───────────────────────────────
+// ชื่อกล้องขึ้นต้นด้วยชื่อไซต์ เช่น "นเรศวร.ทางเข้า1" — ไม่ match = "อื่นๆ"
+const CAMERA_SITES  = ['นเรศวร', 'บ่อขยะ', 'วอแก้ว', 'สูงอายุ', 'หนองกระทิง', 'อบจ'];
+const getCameraSite = (name) => CAMERA_SITES.find((s) => String(name || '').startsWith(s)) || 'อื่นๆ';
+// รองรับทั้ง shape จาก Zabbix (available) และ HikCentral (online)
+const isCamOnline   = (c) => (c.available !== undefined ? c.available === 1 : c.online === true);
 
 // LINE Flex bubble จำกัด JSON 10KB — กันชนที่ 9000 bytes
 // นับ byte ไม่ใช่ char เพราะภาษาไทยกิน 3 bytes/ตัวอักษรใน UTF-8
@@ -533,6 +697,33 @@ async function route(text, rawText, userId, replyToken) {
     });
   }
 
+  // ── กล้อง:ไซต์ [หน้า] — ระดับ 2 ของคำสั่ง "กล้อง" (กดปุ่มไซต์จาก Quick Reply) ─
+  if (text.startsWith('กล้อง:')) {
+    if (!auth.canExecute(userId, 'กล้อง')) return reply(replyToken, fmt.buildError('คุณไม่มีสิทธิ์ใช้คำสั่งนี้'));
+    const arg  = text.slice('กล้อง:'.length).trim();
+    const m    = arg.match(/^(.*?)\s*(\d+)?$/);
+    const site = (m?.[1] || '').trim();
+    const page = m?.[2] ? parseInt(m[2], 10) : 1;
+
+    const cameras  = await getCamerasWithCache();
+    const siteCams = cameras.filter((c) => getCameraSite(c.name) === site);
+    if (!siteCams.length) {
+      return reply(replyToken, fmt.buildError(`ไม่พบกล้องในไซต์ "${site}" — พิมพ์ "กล้อง" เพื่อดูรายชื่อไซต์`));
+    }
+
+    // Pagination: หน้าละ 8 — ปุ่ม "กล้อง:ไซต์ 2" = หน้า 2
+    const pg  = paginate(siteCams, page);
+    const msg = fmt.buildSiteCameras(site, pg.items, pg, siteCams);
+    const safeMsg = flexOversize(msg)
+      ? fmt.buildSiteCameras(site, pg.items.slice(0, 5), pg, siteCams)
+      : msg;
+
+    // ปุ่มเปลี่ยนหน้าอยู่ในการ์ดแล้ว (listFooter) — เหลือแค่ปุ่มกลับใน Quick Reply
+    return reply(replyToken, safeMsg, [
+      { type: 'action', action: { type: 'message', label: '↩ กลับ', text: 'กล้อง' } },
+    ]);
+  }
+
   // ── Matched commands ────────────────────────────────────────────────────────
   const cmd = matchCommand(text);
 
@@ -590,11 +781,12 @@ async function route(text, rawText, userId, replyToken) {
       processed.pageInfo  = { page: pg.page, totalPages: pg.totalPages };
       userLastAlertCtx.set(userId, { problems, page: pg.page, setAt: Date.now() });
 
-      const msg     = fmt.buildAlerts(processed, null, 'วิเคราะห์ alert');
+      const alertOpts = { pageCmd: 'alert', pg };
+      const msg     = fmt.buildAlerts(processed, null, 'วิเคราะห์ alert', alertOpts);
       const safeMsg = flexOversize(msg)
-        ? fmt.buildAlerts({ ...processed, topItems: processed.topItems.slice(0, 5), clusters: [] }, null, 'วิเคราะห์ alert')
+        ? fmt.buildAlerts({ ...processed, topItems: processed.topItems.slice(0, 5), clusters: [] }, null, 'วิเคราะห์ alert', alertOpts)
         : msg;
-      return reply(replyToken, safeMsg, pageQR('alert', pg));
+      return reply(replyToken, safeMsg);
     }
 
     case 'host': {
@@ -610,11 +802,12 @@ async function route(text, rawText, userId, replyToken) {
       userLastHostCtx.set(userId, { text: hostCtxText, page: pg.page, setAt: Date.now() });
 
       const hostTitle = pg.totalPages > 1 ? `สถานะ Host (หน้า ${pg.page}/${pg.totalPages})` : 'สถานะ Host';
-      const hostMsg  = fmt.buildHosts(pg.items, null, hostTitle, '💻', 'วิเคราะห์ host', { statsFrom: hosts });
+      const hostOpts = { statsFrom: hosts, deviceType: 'host', pageCmd: 'host', pg };
+      const hostMsg  = fmt.buildHosts(pg.items, null, hostTitle, '💻', 'วิเคราะห์ host', hostOpts);
       const safeHost = flexOversize(hostMsg)
-        ? fmt.buildHosts(pg.items.slice(0, 5), null, hostTitle, '💻', 'วิเคราะห์ host', { statsFrom: hosts })
+        ? fmt.buildHosts(pg.items.slice(0, 5), null, hostTitle, '💻', 'วิเคราะห์ host', hostOpts)
         : hostMsg;
-      return reply(replyToken, safeHost, pageQR('host', pg));
+      return reply(replyToken, safeHost);
     }
 
     case 'camera': {
@@ -622,25 +815,33 @@ async function route(text, rawText, userId, replyToken) {
 
       const cameras = await getCamerasWithCache();
 
-      // รองรับทั้ง shape จาก Zabbix (available) และ HikCentral (online)
-      const cameraOffline = cameras.filter((c) => (c.available !== undefined ? c.available !== 1 : !c.online));
+      const cameraOffline = cameras.filter((c) => !isCamOnline(c));
       const cameraCtxText = `กล้องทั้งหมด ${cameras.length} เครื่อง ปกติ ${cameras.length - cameraOffline.length} มีปัญหา ${cameraOffline.length}` +
         (cameraOffline.length > 0 ? `: ${cameraOffline.slice(0, 5).map((c) => c.name).join(', ')}` : '');
+      userLastCameraCtx.set(userId, { text: cameraCtxText, setAt: Date.now() });
 
-      // Pagination: ครั้งละ 8 — "กล้อง 2" = หน้า 2
-      const pg = paginate(cameras, parsePage(text));
-      userLastCameraCtx.set(userId, { text: cameraCtxText, page: pg.page, setAt: Date.now() });
+      // ระดับ 1: สรุปรายไซต์ — กดปุ่ม/แถวไซต์ส่ง "กล้อง:ไซต์" เข้าระดับ 2
+      const siteMap = new Map();
+      for (const c of cameras) {
+        const s = getCameraSite(c.name);
+        const e = siteMap.get(s) || { site: s, total: 0, online: 0, offline: 0 };
+        e.total++;
+        if (isCamOnline(c)) e.online++; else e.offline++;
+        siteMap.set(s, e);
+      }
+      const siteStats = [...CAMERA_SITES, 'อื่นๆ']
+        .filter((s) => siteMap.has(s))
+        .map((s) => siteMap.get(s));
 
-      const title = pg.totalPages > 1
-        ? `สถานะกล้อง (หน้า ${pg.page}/${pg.totalPages})`
-        : `สถานะ Hikvision Camera`;
-      const cameraMsg = fmt.buildHosts(pg.items, null, title, '🎥', 'วิเคราะห์กล้อง', { statsFrom: cameras });
+      const siteMsg = fmt.buildCameraSites(siteStats, 'วิเคราะห์กล้อง');
+      const safeCam = flexOversize(siteMsg)
+        ? fmt.buildCameraSites(siteStats.slice(0, 8), 'วิเคราะห์กล้อง')
+        : siteMsg;
 
-      const safeCam = flexOversize(cameraMsg)
-        ? fmt.buildHosts(pg.items.slice(0, 5), null, title, '🎥', 'วิเคราะห์กล้อง', { statsFrom: cameras })
-        : cameraMsg;
-
-      return reply(replyToken, safeCam, pageQR('กล้อง', pg));
+      const siteQR = siteStats.slice(0, 8).map((s) => ({
+        type: 'action', action: { type: 'message', label: `${s.site} (${s.total})`, text: `กล้อง:${s.site}` },
+      }));
+      return reply(replyToken, safeCam, siteQR);
     }
 
     case 'cameraOff': {
@@ -685,11 +886,12 @@ async function route(text, rawText, userId, replyToken) {
       userLastWifiCtx.set(userId, { text: wifiCtxText, page: pg.page, setAt: Date.now() });
 
       const wifiTitle = pg.totalPages > 1 ? `สถานะ Access Point (หน้า ${pg.page}/${pg.totalPages})` : 'สถานะ Access Point';
-      const wifiMsg  = fmt.buildHosts(pg.items, null, wifiTitle, '📶', 'วิเคราะห์ wifi', { statsFrom: aps });
+      const wifiOpts = { statsFrom: aps, deviceType: 'ap', pageCmd: 'wifi', pg };
+      const wifiMsg  = fmt.buildHosts(pg.items, null, wifiTitle, '📶', 'วิเคราะห์ wifi', wifiOpts);
       const safeWifi = flexOversize(wifiMsg)
-        ? fmt.buildHosts(pg.items.slice(0, 5), null, wifiTitle, '📶', 'วิเคราะห์ wifi', { statsFrom: aps })
+        ? fmt.buildHosts(pg.items.slice(0, 5), null, wifiTitle, '📶', 'วิเคราะห์ wifi', wifiOpts)
         : wifiMsg;
-      return reply(replyToken, safeWifi, pageQR('wifi', pg));
+      return reply(replyToken, safeWifi);
     }
 
     case 'client': {

@@ -81,7 +81,7 @@ ${alertData.comments ? `หมายเหตุ: ${alertData.comments}` : ''}
 }
 
 // ── ตอบคำถามทั่วไปโดยอิงข้อมูล context จาก Zabbix ────────────────────────────
-async function chat(message, context = null) {
+async function chat(message, context = null, maxTokens = 500) {
   let prompt = message;
   if (context) {
     const ctxStr = typeof context === 'string'
@@ -89,7 +89,7 @@ async function chat(message, context = null) {
       : JSON.stringify(context, null, 2).slice(0, 1000);
     prompt = `ข้อมูลระบบปัจจุบัน:\n${ctxStr}\n\nคำถาม: ${message}`;
   }
-  return ask(prompt, 500);
+  return ask(prompt, maxTokens);
 }
 
 // ── สรุปภาพรวมระบบทั้งหมด ────────────────────────────────────────────────────

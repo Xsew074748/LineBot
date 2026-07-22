@@ -12,6 +12,10 @@ logs
 *.log
 npm-debug.log*
 
+# ── Database files ────────────────────────────────────────
+cameras.db*
+*.db*
+
 # ── Git history ───────────────────────────────────────────
 .git
 .gitignore

@@ -21,13 +21,11 @@ const MONITORS = {
     requiredEnv: ['OMADA_URL', 'OMADA_USERNAME', 'OMADA_PASSWORD', 'OMADA_SITE_ID'],
   },
   hikcentral: {
-    enabled: false, // ปิดชั่วคราว — ยังไม่มี server จริง
-    // เปิดเมื่อพร้อม: ตั้งค่า HIKCENTRAL_URL, HIKCENTRAL_CLIENT_ID, HIKCENTRAL_CLIENT_SECRET
-    // ใน .env แล้วเปลี่ยน enabled กลับเป็น true
+    enabled: true,
     name: 'HikCentral',
     type: 'hikcentral',
     adapterModule: './adapters/hikcentral',
-    requiredEnv: ['HIKCENTRAL_URL', 'HIKCENTRAL_CLIENT_ID', 'HIKCENTRAL_CLIENT_SECRET'],
+    requiredEnv: ['HIKCENTRAL_URL', 'HIKCENTRAL_APP_KEY', 'HIKCENTRAL_APP_SECRET'],
   },
 };
 

@@ -61,7 +61,11 @@ function verifyPassword(password) {
     stored = m ? m[1].trim() : '';
   } catch {}
   if (!stored) stored = sha256('admin'); // default password before first setup
-  return sha256(password) === stored;
+  // timingSafeEqual บังคับให้ทั้งสอง buffer ยาวเท่ากัน — ตรวจก่อนเรียกเสมอ
+  // (stored อาจไม่ใช่ sha256 hex 64 ตัว ถ้า .env ถูกแก้มือ)
+  const a = Buffer.from(sha256(password));
+  const b = Buffer.from(stored);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
 function lanOnly(req, res, next) {
