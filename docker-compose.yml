@@ -1,8 +1,11 @@
 services:
 
   # ── IT Monitor Bot ──────────────────────────────────────
+  # ใช้ image จาก Docker Hub — แก้โค้ดแล้วต้อง build+push ใหม่:
+  #   docker build -t phattadol358/netguard-ai:latest . && docker push phattadol358/netguard-ai:latest
+  #   docker compose up -d --pull always
   line-bot:
-    build: .
+    image: phattadol358/netguard-ai:latest
     container_name: it-monitor-bot
     restart: always
 
