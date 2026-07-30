@@ -108,43 +108,91 @@ function extractList(result) {
   return Array.isArray(result) ? result : (result?.data || []);
 }
 
-// ── ดึง Access Points ─────────────────────────────────────────────────────────
+// ── ดึงอุปกรณ์ทั้งหมด แยกตามประเภท ───────────────────────────────────────────
 // GET /openapi/v1/{omadacId}/sites/{siteId}/devices — คืน AP + Switch + Gateway รวมกัน
+// คืน { aps, switches, gateways, all } — all คือทุก type รวม type ที่ไม่รู้จัก
 async function getAPs(siteId = SITE_ID) {
   const result = await omadaGet(`/openapi/v1/${OMADAC_ID}/sites/${siteId}/devices?pageSize=100&page=1`);
-  const all    = extractList(result);
-  const aps    = all.filter((d) => d.type === 'ap');
+  const all    = extractList(result).map((d) => ({
+    name:   d.name,
+    ip:     d.ip,
+    status: d.status === 1 ? 'up' : 'down',
+    mac:    d.mac,
+    model:  d.model,
+    type:   d.type,
+  }));
 
-  if (all.length > 0 && aps.length === 0) {
-    logger.warn(`omada: getAPs กรอง 0 จาก ${all.length} devices — ตรวจ field type ของ device จริงแล้วปรับ filter`);
+  const aps      = all.filter((d) => d.type === 'ap');
+  const switches = all.filter((d) => d.type === 'switch');
+  const gateways = all.filter((d) => d.type === 'gateway');
+
+  if (all.length > 0 && aps.length + switches.length + gateways.length === 0) {
+    logger.warn(`omada: getAPs กรองไม่เจอ type ที่รู้จักจาก ${all.length} devices — ตรวจ field type ของ device จริงแล้วปรับ filter`);
   }
 
-  return aps.map((ap) => ({
-    name:   ap.name,
-    ip:     ap.ip,
-    status: ap.status === 1 ? 'up' : 'down',
-    mac:    ap.mac,
-    model:  ap.model,
-  }));
+  return { aps, switches, gateways, all };
 }
 
 // ── ดึง Client ที่เชื่อมต่อ ────────────────────────────────────────────────────
 // ถ้าล้มเหลวคืนค่าเปล่า (unavailable) แทน throw เพื่อไม่ให้คำสั่ง client/summary พังทั้งหมด
+// คืน { total, wireless, wired, clients } — clients มีรายละเอียดรายตัว
 async function getClients(siteId = SITE_ID) {
   let result = null;
   try {
     result = await omadaGet(`/openapi/v1/${OMADAC_ID}/sites/${siteId}/clients?pageSize=100&page=1`);
   } catch (err) {
     logger.warn(`omada: getClients ล้มเหลว: ${err.message}`);
-    return { total: 0, wireless: 0, wired: 0, unavailable: true };
+    return { total: 0, wireless: 0, wired: 0, clients: [], unavailable: true };
   }
   const data  = extractList(result);
   const total = Array.isArray(result) ? result.length : (result?.totalRows ?? data.length);
+
+  // field ชื่อไม่เท่ากันตามรุ่น controller — เผื่อ fallback ทั้ง camelCase หลัก ๆ
+  const clients = data.map((c) => ({
+    name:     c.name || c.hostName || c.mac || 'N/A',
+    ip:       c.ip || null,
+    mac:      c.mac || null,
+    ssid:     c.ssid || null,
+    ap:       c.apName || null,
+    signal:   c.signalLevel ?? c.rssi ?? null,
+    traffic:  (c.trafficDown ?? c.trafficUp) != null
+      ? { down: Number(c.trafficDown) || 0, up: Number(c.trafficUp) || 0 }
+      : null,
+    wireless: !!c.wireless,
+  }));
+
   return {
     total,
-    wireless: data.filter((c) =>  c.wireless).length,
-    wired:    data.filter((c) => !c.wireless).length,
+    wireless: clients.filter((c) =>  c.wireless).length,
+    wired:    clients.filter((c) => !c.wireless).length,
+    clients,
   };
+}
+
+// ── ดึงสถานะ port ของ switch ──────────────────────────────────────────────────
+// GET /openapi/v1/{omadacId}/sites/{siteId}/switches/{switchMac}/ports
+// ชื่อ field ต่างกันตามเวอร์ชัน controller — map แบบเผื่อ fallback แล้ว normalize
+const LINK_SPEED = { 0: 'Auto', 1: '10M', 2: '100M', 3: '1G', 4: '2.5G', 5: '10G' };
+
+async function getSwitchPorts(switchMac, siteId = SITE_ID) {
+  const mac    = String(switchMac).toUpperCase().replace(/:/g, '-');
+  const result = await omadaGet(
+    `/openapi/v1/${OMADAC_ID}/sites/${siteId}/switches/${encodeURIComponent(mac)}/ports`
+  );
+  return extractList(result).map((p) => {
+    const portId   = p.port ?? p.portId ?? p.id;
+    const linkRaw  = p.linkStatus ?? p.portStatus?.linkStatus ?? p.status;
+    const speedRaw = p.linkSpeed ?? p.portStatus?.linkSpeed ?? p.speed;
+    const poeRaw   = p.poe ?? p.poeMode ?? p.portStatus?.poe;
+    return {
+      portId,
+      name:      p.name || p.profileName || `Port ${portId}`,
+      status:    Number(linkRaw) === 1 ? 'up' : 'down',
+      speed:     typeof speedRaw === 'number' ? (LINK_SPEED[speedRaw] || `${speedRaw}`) : (speedRaw || null),
+      poeStatus: poeRaw != null ? (Number(poeRaw) === 1 || poeRaw === true ? 'on' : 'off') : null,
+      clientMac: p.clientMac || p.deviceMac || null,
+    };
+  });
 }
 
 // ── ดึง Alert ─────────────────────────────────────────────────────────────────
@@ -203,4 +251,4 @@ async function testConnection(baseUrl /*, username, password */) {
 }
 
 // http: axios instance ที่ฝัง httpsAgent ไว้แล้ว — ใช้ได้จากภายนอก (เช่น routes/config.js)
-module.exports = { getToken, getAPs, getClients, getAlerts, healthCheck, testConnection, http: omadaHttp };
+module.exports = { getToken, getAPs, getClients, getSwitchPorts, getAlerts, healthCheck, testConnection, http: omadaHttp };

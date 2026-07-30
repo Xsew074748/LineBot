@@ -222,16 +222,27 @@ describe('OmadaAdapter', () => {
   });
 
   describe('getDevices()', () => {
-    it('แปลง Omada APs เป็น normalized devices', async () => {
-      omadaSvc.getAPs.mockResolvedValue([
-        { name: 'AP-Floor-1', mac: 'AA:BB:CC:DD:EE:01', status: '🟢 เชื่อมต่อ',     clients: 12, model: 'EAP660', isProblem: false },
-        { name: 'AP-Floor-2', mac: 'AA:BB:CC:DD:EE:02', status: '🔴 ไม่เชื่อมต่อ', clients: 0,  model: 'EAP670', isProblem: true  },
-      ]);
+    it('แปลง Omada devices (all) เป็น normalized devices', async () => {
+      // getAPs คืน { aps, switches, gateways, all } — adapter ใช้ all
+      const all = [
+        { name: 'AP-Floor-1', mac: 'AA:BB:CC:DD:EE:01', status: 'up',   model: 'EAP660',  type: 'ap' },
+        { name: 'AP-Floor-2', mac: 'AA:BB:CC:DD:EE:02', status: 'down', model: 'EAP670',  type: 'ap' },
+        { name: 'SW-CORE-01', mac: 'AA:BB:CC:DD:EE:03', status: 'up',   model: 'SG3428',  type: 'switch' },
+        { name: 'GW-MAIN-01', mac: 'AA:BB:CC:DD:EE:04', status: 'up',   model: 'ER7206',  type: 'gateway' },
+      ];
+      omadaSvc.getAPs.mockResolvedValue({
+        aps:      all.filter((d) => d.type === 'ap'),
+        switches: all.filter((d) => d.type === 'switch'),
+        gateways: all.filter((d) => d.type === 'gateway'),
+        all,
+      });
       const result = await adapter.getDevices();
-      expect(result).toHaveLength(2);
+      expect(result).toHaveLength(4);
       expect(result[0].type).toBe('ap');
       expect(result[0].status).toBe('up');
       expect(result[1].status).toBe('down');
+      expect(result[2].type).toBe('switch');
+      expect(result[3].type).toBe('gateway');
     });
   });
 });

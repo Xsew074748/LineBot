@@ -37,13 +37,14 @@ class OmadaAdapter extends BaseMonitorAdapter {
 
   async getDevices() {
     try {
-      const raw = await omadaService.getAPs();
-      return raw.map((ap) => ({
-        device: ap.name,
+      // getAPs คืน { aps, switches, gateways, all } — normalize จาก all ทุกประเภท
+      const { all = [] } = await omadaService.getAPs();
+      return all.map((d) => ({
+        device: d.name,
         zone:   'ไม่ระบุ',
-        type:   'ap',
-        status: ap.isProblem ? 'down' : 'up',
-        ip:     ap.ip || null,
+        type:   d.type || 'ap',
+        status: d.status === 'down' ? 'down' : 'up',
+        ip:     d.ip || null,
       }));
     } catch (err) {
       logger.error('OmadaAdapter.getDevices', err);

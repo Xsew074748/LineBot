@@ -154,8 +154,10 @@ function buildHelp(extraCmds = []) {
     ['💻 host / เครื่อง',      'สถานะ Host ทั้งหมด'],
     ['📷 กล้อง / camera',      'สถานะกล้องทั้งหมด'],
     ['📷 กล้องดับ',             'เฉพาะกล้อง Offline'],
-    ['📶 wifi / ap',            'สถานะ Access Point'],
-    ['👥 client',               'จำนวน Client WiFi'],
+    ['📶 wifi / ap',            'AP + Switch + Gateway'],
+    ['🔌 port',                 'สถานะ port ราย switch'],
+    ['👥 client',               'รายชื่อ Client WiFi'],
+    ['📈 metric [ชื่อ host]',   'CPU / RAM / Disk'],
     ['🔗 cross / ข้ามระบบ',    'วิเคราะห์ alert ข้ามระบบ'],
     ['📊 ทั้งหมด / summary',   'รวมทุก Monitor'],
     ['🧠 สรุป',                 'AI สรุปภาพรวม'],
@@ -354,6 +356,281 @@ function buildHosts(hosts, analysis, title = 'สถานะ Host', icon = '�
     ]),
     vbox(COLOR.white, rows, { spacing: 'xs', paddingAll: '12px' }),
     listFooter(opts.pageCmd, opts.pg, analyzeText, analysis)
+  );
+}
+
+// ── Network Devices (AP + Switch + Gateway) — คำสั่ง "wifi" ───────────────────
+// devices = หน้าที่แบ่งแล้ว (แต่ละตัวมี type: 'ap'|'switch'|'gateway')
+// แทรกหัว section เมื่อ type เปลี่ยน — รายการต้องเรียงตาม type มาก่อนแล้ว
+// opts.statsFrom: array เต็มสำหรับนับใน header, opts.pageCmd + opts.pg: ปุ่มเปลี่ยนหน้า
+const NET_TYPE_LABEL = { gateway: '🌐 Gateway', switch: '🔌 Switch', ap: '📶 Access Point' };
+
+function buildNetworkDevices(devices, title = 'อุปกรณ์เครือข่าย', analyzeText = null, opts = {}) {
+  const isUp     = (d) => d.status === 'up';
+  const statsSrc = opts.statsFrom || devices;
+  const total    = statsSrc.length;
+  const online   = statsSrc.filter(isUp).length;
+  const offline  = total - online;
+  const hc       = offline ? COLOR.red : COLOR.green;
+
+  const rows = [];
+  let lastType = null;
+  for (const d of devices) {
+    if (d.type !== lastType) {
+      rows.push(txt(NET_TYPE_LABEL[d.type] || `🔧 ${d.type || 'อื่นๆ'}`, 'xs', COLOR.blue,
+        { weight: 'bold', margin: rows.length ? 'md' : 'none' }));
+      lastType = d.type;
+    }
+    const topRow = hbox([
+      txt(isUp(d) ? '🟢' : '🔴', 'sm', COLOR.white, { flex: 0, gravity: 'center' }),
+      txt(d.name, 'sm', '#222222', { flex: 1, weight: 'bold', wrap: true, margin: 'sm' }),
+      aiRowBtn(d.type || 'ap', d.name, d.ip),
+    ]);
+    const contents = [topRow];
+    if (d.ip) contents.push(txt(`(${d.ip})`, 'xs', '#888888', { margin: 'xs' }));
+    rows.push(vbox('#FAFAFA', contents, { margin: 'sm', paddingAll: '8px', cornerRadius: '6px' }));
+  }
+  if (!rows.length) rows.push(txt('ℹ️ ไม่พบข้อมูล', 'sm', '#888888', { align: 'center' }));
+
+  const cnt = (t) => statsSrc.filter((d) => d.type === t).length;
+
+  return bubble(
+    vbox(hc, [
+      txt(`📡 ${title}`, 'lg', COLOR.white, { weight: 'bold' }),
+      hbox([
+        txt(`📶 ${cnt('ap')} · 🔌 ${cnt('switch')} · 🌐 ${cnt('gateway')}`, 'xs', COLOR.white, { flex: 1 }),
+        txt(nowTH(), 'xs', '#999999', { align: 'end', flex: 0 }),
+      ], { margin: 'sm' }),
+      hbox([
+        txt(`🟢 ${online} เชื่อมต่อ`, 'xs', COLOR.white, { flex: 1 }),
+        txt(`🔴 ${offline} ไม่เชื่อมต่อ`, 'xs', COLOR.white, { flex: 1 }),
+      ], { margin: 'xs' }),
+    ]),
+    vbox(COLOR.white, rows, { spacing: 'xs', paddingAll: '12px' }),
+    listFooter(opts.pageCmd, opts.pg, analyzeText)
+  );
+}
+
+// ── Client List (Omada) — คำสั่ง "client" ─────────────────────────────────────
+// clients = หน้าที่แบ่งแล้ว, stats = { total, wireless, wired } นับจากทั้งชุด
+// opts.pageCmd + opts.pg: ปุ่มเปลี่ยนหน้าในการ์ด
+function fmtBytes(n) {
+  if (n == null) return null;
+  if (n >= 1024 ** 3) return (n / 1024 ** 3).toFixed(1) + ' GB';
+  if (n >= 1024 ** 2) return (n / 1024 ** 2).toFixed(1) + ' MB';
+  if (n >= 1024)      return (n / 1024).toFixed(0) + ' KB';
+  return n + ' B';
+}
+
+function buildClients(clients, stats, opts = {}) {
+  const rows = clients.map((c) => {
+    const topRow = hbox([
+      txt(c.wireless ? '📶' : '🔌', 'sm', COLOR.white, { flex: 0, gravity: 'center' }),
+      txt(sanitizeFlex(c.name, 60), 'sm', '#222222', { flex: 1, weight: 'bold', wrap: true, margin: 'sm' }),
+      ...(c.signal != null
+        ? [txt(`${c.signal}`, 'xs', '#888888', { align: 'end', gravity: 'center', flex: 0 })]
+        : []),
+    ]);
+
+    // บรรทัดล่าง: IP · SSID@AP (wireless) หรือ IP อย่างเดียว (wired)
+    const subParts = [
+      c.ip ? `(${c.ip})` : null,
+      c.wireless ? [c.ssid, c.ap ? `@${c.ap}` : null].filter(Boolean).join('') || null : null,
+      c.traffic ? `↓${fmtBytes(c.traffic.down)} ↑${fmtBytes(c.traffic.up)}` : null,
+    ].filter(Boolean);
+
+    const contents = [topRow];
+    if (subParts.length) contents.push(txt(subParts.join(' · '), 'xs', '#888888', { margin: 'xs', wrap: true }));
+
+    return vbox('#FAFAFA', contents, { margin: 'sm', paddingAll: '8px', cornerRadius: '6px' });
+  });
+
+  if (!rows.length) rows.push(txt('ℹ️ ไม่มี client เชื่อมต่ออยู่', 'sm', '#888888', { align: 'center' }));
+
+  const pageSuffix = opts.pg && opts.pg.totalPages > 1 ? ` (หน้า ${opts.pg.page}/${opts.pg.totalPages})` : '';
+
+  return bubble(
+    vbox(COLOR.teal, [
+      txt(`👥 Client ที่เชื่อมต่อ${pageSuffix}`, 'lg', COLOR.white, { weight: 'bold' }),
+      hbox([
+        txt(`ทั้งหมด ${stats.total}`, 'xs', COLOR.white, { flex: 1 }),
+        txt(nowTH(), 'xs', '#FFFFFFAA', { align: 'end', flex: 0 }),
+      ], { margin: 'sm' }),
+      hbox([
+        txt(`📶 Wireless ${stats.wireless}`, 'xs', COLOR.white, { flex: 1 }),
+        txt(`🔌 Wired ${stats.wired}`, 'xs', COLOR.white, { flex: 1 }),
+      ], { margin: 'xs' }),
+    ]),
+    vbox(COLOR.white, rows, { spacing: 'xs', paddingAll: '12px' }),
+    listFooter(opts.pageCmd, opts.pg, null)
+  );
+}
+
+// ── Host Metrics (CPU / RAM / Disk) — คำสั่ง "metric <host>" ──────────────────
+// metrics = { cpu, memory, disk } แต่ละตัว = { percent, updatedAt } หรือ null
+function metricColor(p) {
+  if (p == null) return COLOR.gray;
+  if (p >= 90)   return COLOR.red;
+  if (p >= 70)   return COLOR.orange;
+  return COLOR.green;
+}
+
+function metricBar(percent, color) {
+  const w = Math.min(Math.max(percent, 0), 100);
+  return {
+    type: 'box', layout: 'vertical', backgroundColor: '#EEEEEE',
+    cornerRadius: '4px', height: '8px', margin: 'sm',
+    contents: [{
+      type: 'box', layout: 'vertical', backgroundColor: color,
+      cornerRadius: '4px', height: '8px', width: `${w}%`,
+      contents: [{ type: 'filler' }],
+    }],
+  };
+}
+
+function buildHostMetrics(hostName, ip, metrics) {
+  const defs = [
+    ['🧠 CPU',  metrics.cpu],
+    ['💾 RAM',  metrics.memory],
+    ['🗄️ Disk', metrics.disk],
+  ];
+
+  const rows = defs.map(([label, m]) => {
+    const c = metricColor(m?.percent);
+    const contents = [
+      hbox([
+        txt(label, 'sm', '#333333', { weight: 'bold', flex: 1 }),
+        txt(m ? `${m.percent}%` : 'N/A', 'sm', c, { weight: 'bold', align: 'end', flex: 0 }),
+      ]),
+    ];
+    if (m) {
+      contents.push(metricBar(m.percent, c));
+      if (m.updatedAt) contents.push(txt(`อัปเดต ${m.updatedAt}`, 'xxs', '#AAAAAA', { margin: 'xs' }));
+    } else {
+      contents.push(txt('ไม่มี item นี้ใน Zabbix', 'xxs', '#AAAAAA', { margin: 'xs' }));
+    }
+    return vbox('#FAFAFA', contents, { margin: 'sm', paddingAll: '10px', cornerRadius: '8px' });
+  });
+
+  const worst = Math.max(...defs.map(([, m]) => m?.percent ?? 0));
+
+  return bubble(
+    vbox(metricColor(worst), [
+      txt('📈 Host Metrics', 'lg', COLOR.white, { weight: 'bold' }),
+      hbox([
+        txt(sanitizeFlex(hostName, 60), 'sm', COLOR.white, { weight: 'bold', flex: 1, wrap: true }),
+        txt(nowTH(), 'xs', '#FFFFFFAA', { align: 'end', flex: 0 }),
+      ], { margin: 'sm' }),
+      ...(ip ? [txt(`(${ip})`, 'xs', '#FFFFFFCC', { margin: 'xs' })] : []),
+    ]),
+    vbox(COLOR.white, rows, { spacing: 'sm', paddingAll: '12px' })
+  );
+}
+
+// ── รายการ host ที่ค้นเจอหลายตัว — ให้กดเลือก ────────────────────────────────
+function buildHostPicker(query, hosts) {
+  const rows = hosts.map((h) => ({
+    type: 'box', layout: 'horizontal', margin: 'sm', paddingAll: '10px',
+    backgroundColor: '#FAFAFA', cornerRadius: '8px',
+    action: { type: 'message', label: 'เลือก', text: `metric ${h.name}` },
+    contents: [
+      txt('💻', 'sm', COLOR.white, { flex: 0, gravity: 'center' }),
+      { type: 'box', layout: 'vertical', flex: 1, margin: 'sm', contents: [
+        txt(h.name, 'sm', '#222222', { weight: 'bold', wrap: true }),
+        ...(h.ip ? [txt(`(${h.ip})`, 'xxs', '#888888')] : []),
+      ]},
+      txt('›', 'xl', '#BBBBBB', { gravity: 'center', flex: 0 }),
+    ],
+  }));
+
+  return bubble(
+    vbox(COLOR.blue, [
+      txt('📈 เลือก Host', 'lg', COLOR.white, { weight: 'bold' }),
+      txt(`พบ ${hosts.length} เครื่องจากคำค้น "${sanitizeFlex(query, 40)}"`, 'xs', '#CCDDFF', { margin: 'sm', wrap: true }),
+    ]),
+    vbox(COLOR.white, rows, { spacing: 'xs', paddingAll: '12px' })
+  );
+}
+
+// ── Switch Picker — คำสั่ง "port" (ระดับ 1: เลือก switch ก่อน) ────────────────
+function buildSwitchPicker(switches) {
+  const rows = switches.slice(0, 10).map((s) => ({
+    type: 'box', layout: 'horizontal', margin: 'sm', paddingAll: '10px',
+    backgroundColor: s.status === 'up' ? '#FAFAFA' : '#FFF5F5', cornerRadius: '8px',
+    action: { type: 'message', label: 'ดู port', text: `port:${s.mac}` },
+    contents: [
+      txt(s.status === 'up' ? '🟢' : '🔴', 'sm', COLOR.white, { flex: 0, gravity: 'center' }),
+      { type: 'box', layout: 'vertical', flex: 1, margin: 'sm', contents: [
+        txt(s.name, 'sm', '#222222', { weight: 'bold', wrap: true }),
+        txt([s.model, s.ip ? `(${s.ip})` : null].filter(Boolean).join(' · ') || '-', 'xxs', '#888888'),
+      ]},
+      txt('›', 'xl', '#BBBBBB', { gravity: 'center', flex: 0 }),
+    ],
+  }));
+
+  if (switches.length > 10) {
+    rows.push(txt(`… และอีก ${switches.length - 10} ตัว`, 'xs', '#888888', { align: 'center', margin: 'sm' }));
+  }
+  rows.push(txt('กดที่ switch เพื่อดูสถานะ port รายตัว', 'xs', '#AAAAAA', { align: 'center', margin: 'md' }));
+
+  return bubble(
+    vbox(COLOR.blue, [
+      txt('🔌 เลือก Switch', 'lg', COLOR.white, { weight: 'bold' }),
+      hbox([
+        txt(`ทั้งหมด ${switches.length} ตัว`, 'xs', COLOR.white, { flex: 1 }),
+        txt(nowTH(), 'xs', '#CCDDFF', { align: 'end', flex: 0 }),
+      ], { margin: 'sm' }),
+    ]),
+    vbox(COLOR.white, rows, { spacing: 'xs', paddingAll: '12px' })
+  );
+}
+
+// ── Switch Ports — คำสั่ง "port:<mac>" (ระดับ 2) ──────────────────────────────
+// ports = หน้าที่แบ่งแล้ว, allPorts = ทั้งหมดสำหรับนับ header
+function buildSwitchPorts(switchName, ports, pg, allPorts, opts = {}) {
+  const total  = allPorts.length;
+  const up     = allPorts.filter((p) => p.status === 'up').length;
+  const hc     = up === total && total > 0 ? COLOR.green : up === 0 ? COLOR.red : COLOR.yellow;
+
+  const rows = ports.map((p) => {
+    const on = p.status === 'up';
+    const subParts = [
+      on && p.speed ? p.speed : null,
+      p.poeStatus ? `PoE ${p.poeStatus === 'on' ? '⚡ on' : 'off'}` : null,
+      p.clientMac ? p.clientMac : null,
+    ].filter(Boolean);
+
+    const topRow = hbox([
+      txt(on ? '🟢' : '⚪', 'sm', COLOR.white, { flex: 0, gravity: 'center' }),
+      txt(`Port ${p.portId}`, 'sm', '#222222', { weight: 'bold', flex: 0, margin: 'sm' }),
+      txt(sanitizeFlex(p.name, 40), 'xs', '#666666', { flex: 1, margin: 'sm', gravity: 'center', wrap: true }),
+      txt(on ? 'UP' : 'DOWN', 'xs', on ? COLOR.green : '#999999', { weight: 'bold', align: 'end', flex: 0, gravity: 'center' }),
+    ]);
+
+    const contents = [topRow];
+    if (subParts.length) contents.push(txt(subParts.join(' · '), 'xxs', '#888888', { margin: 'xs' }));
+
+    return vbox(on ? '#F7FDF9' : '#FAFAFA', contents, { margin: 'sm', paddingAll: '8px', cornerRadius: '6px' });
+  });
+
+  if (!rows.length) rows.push(txt('ℹ️ ไม่พบข้อมูล port', 'sm', '#888888', { align: 'center' }));
+
+  const pageSuffix = pg && pg.totalPages > 1 ? ` (หน้า ${pg.page}/${pg.totalPages})` : '';
+
+  return bubble(
+    vbox(hc, [
+      txt(`🔌 ${sanitizeFlex(switchName, 50)}${pageSuffix}`, 'lg', COLOR.white, { weight: 'bold', wrap: true }),
+      hbox([
+        txt(`Port ทั้งหมด ${total}`, 'xs', COLOR.white, { flex: 1 }),
+        txt(nowTH(), 'xs', '#FFFFFFAA', { align: 'end', flex: 0 }),
+      ], { margin: 'sm' }),
+      hbox([
+        txt(`🟢 ${up} up`, 'xs', COLOR.white, { flex: 1 }),
+        txt(`⚪ ${total - up} down`, 'xs', COLOR.white, { flex: 1 }),
+      ], { margin: 'xs' }),
+    ]),
+    vbox(COLOR.white, rows, { spacing: 'xs', paddingAll: '12px' }),
+    listFooter(opts.pageCmd, pg, null)
   );
 }
 
@@ -1078,6 +1355,12 @@ module.exports = {
   buildAlerts,
   buildAlertWarning,
   buildHosts,
+  buildNetworkDevices,
+  buildClients,
+  buildHostMetrics,
+  buildHostPicker,
+  buildSwitchPicker,
+  buildSwitchPorts,
   buildCameraBuildings,
   buildCameraDetail,
   buildCameraSites,

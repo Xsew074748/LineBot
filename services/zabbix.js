@@ -242,6 +242,87 @@ async function getSummary() {
   return { problems, hosts, cameras };
 }
 
+// ── ค้นหา host ตามชื่อ (ใช้กับคำสั่ง "metric <ชื่อ>") ────────────────────────
+// search แบบ substring ทั้ง technical name (host) และ visible name (name)
+async function findHosts(query, limit = 10) {
+  const hosts = await rpc('host.get', {
+    output: ['hostid', 'host', 'name'],
+    selectInterfaces: ['ip'],
+    search: { host: query, name: query },
+    searchByAny: 1,
+    monitored_hosts: 1,
+    sortfield: 'name',
+    limit,
+  });
+  return (hosts || []).map((h) => ({
+    id:   h.hostid,
+    name: h.name || h.host,
+    ip:   h.interfaces?.[0]?.ip || null,
+  }));
+}
+
+// ── ดึง metric ล่าสุด (CPU / Memory / Disk) ของ host ──────────────────────────
+// item.get กรองตาม key มาตรฐาน Linux/Windows agent แล้ว history.get ค่าล่าสุด 1 ค่า
+// คืน { cpu, memory, disk } แต่ละตัว = { percent, updatedAt } หรือ null ถ้าไม่มี item
+const METRIC_KEYS = {
+  cpu:    ['system.cpu.util'],
+  memory: ['vm.memory.size[pavailable]'],
+  // Zabbix 7 Linux/Windows template ใช้ dependent item — เผื่อทั้งสองแบบ
+  disk:   ['vfs.fs.size[/,pused]', 'vfs.fs.size[C:,pused]', 'vfs.fs.dependent.size[/,pused]', 'vfs.fs.dependent.size[C:,pused]'],
+};
+
+// history.get ต้องส่ง history = value_type ของ item (0=float, 3=uint) มิฉะนั้นได้ []
+async function latestValue(item) {
+  const hist = await rpc('history.get', {
+    itemids:   item.itemid,
+    history:   parseInt(item.value_type, 10),
+    sortfield: 'clock',
+    sortorder: 'DESC',
+    limit:     1,
+  });
+  if (hist?.length) return { value: parseFloat(hist[0].value), clock: parseInt(hist[0].clock, 10) };
+  // history อาจถูก housekeeping ลบ — fallback ใช้ lastvalue จาก item.get
+  if (item.lastvalue !== undefined && item.lastvalue !== '') {
+    return { value: parseFloat(item.lastvalue), clock: parseInt(item.lastclock, 10) || null };
+  }
+  return null;
+}
+
+async function getHostMetrics(hostId) {
+  const allKeys = Object.values(METRIC_KEYS).flat();
+  const items = await rpc('item.get', {
+    hostids: hostId,
+    output:  ['itemid', 'key_', 'name', 'lastvalue', 'lastclock', 'value_type', 'units'],
+    filter:  { key_: allKeys },
+  });
+
+  const byKey = {};
+  for (const it of (items || [])) byKey[it.key_] = it;
+
+  // memory ใช้ pavailable (% ว่าง) → กลับเป็น % used, cpu/disk เป็น % used อยู่แล้ว
+  const defs = [
+    ['cpu',    METRIC_KEYS.cpu,    (v) => v],
+    ['memory', METRIC_KEYS.memory, (v) => 100 - v],
+    ['disk',   METRIC_KEYS.disk,   (v) => v],
+  ];
+
+  const result = { cpu: null, memory: null, disk: null };
+  await Promise.all(defs.map(async ([field, keys, transform]) => {
+    const item = keys.map((k) => byKey[k]).find(Boolean);
+    if (!item) return;
+    try {
+      const r = await latestValue(item);
+      if (r && Number.isFinite(r.value)) {
+        result[field] = {
+          percent:   Math.round(transform(r.value) * 10) / 10,
+          updatedAt: r.clock ? new Date(r.clock * 1000).toLocaleString('th-TH') : null,
+        };
+      }
+    } catch { /* item นี้ดึงไม่ได้ — แสดง N/A */ }
+  }));
+  return result;
+}
+
 // ── Health Check ───────────────────────────────────────────────────────────────
 async function healthCheck() {
   try {
@@ -252,4 +333,4 @@ async function healthCheck() {
   }
 }
 
-module.exports = { getProblems, getHosts, getCameras, getSummary, healthCheck, fetchOfflineCamerasRaw, pageOfflineCameras };
+module.exports = { getProblems, getHosts, getCameras, getSummary, healthCheck, fetchOfflineCamerasRaw, pageOfflineCameras, findHosts, getHostMetrics };

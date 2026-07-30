@@ -94,6 +94,48 @@ async function hikPost(path, body = {}) {
   }
 }
 
+// ── ดึงพื้นที่ (regions) — cache map indexCode → name ไว้ใน memory ────────────
+// POST /artemis/api/resource/v1/regions — ใช้แปลง regionIndexCode ตัวเลขเป็นชื่อจริง
+const REGION_CACHE_TTL_MS = 10 * 60 * 1000;
+const regionCache = { map: null, expireAt: 0 };
+
+async function getRegions(pageSize = 500) {
+  const per = Math.min(pageSize, 500);
+  const all = [];
+  let page  = 1;
+  for (;;) {
+    const data = await hikPost('/artemis/api/resource/v1/regions', { pageNo: page, pageSize: per });
+    const list = data?.list || [];
+    all.push(...list);
+    const total = Number(data?.total ?? 0);
+    if (list.length < per || (total && all.length >= total)) break;
+    page += 1;
+  }
+  return all.map((r) => ({
+    indexCode:       r.indexCode || r.regionIndexCode,
+    name:            r.name || r.regionName || 'N/A',
+    parentIndexCode: r.parentIndexCode || null,
+  }));
+}
+
+// คืน object { indexCode: name } จาก cache — ถ้าดึงไม่ได้คืน cache เดิม (หรือ {})
+async function getRegionMap() {
+  if (regionCache.map && Date.now() < regionCache.expireAt) return regionCache.map;
+  try {
+    const regions = await getRegions();
+    const map = {};
+    for (const r of regions) {
+      if (r.indexCode) map[String(r.indexCode)] = r.name;
+    }
+    regionCache.map     = map;
+    regionCache.expireAt = Date.now() + REGION_CACHE_TTL_MS;
+    logger.info(`hikcentral: region map refreshed (${regions.length} regions)`);
+  } catch (err) {
+    logger.warn(`hikcentral: getRegions ล้มเหลว — ใช้ region map เดิม (${err.message})`);
+  }
+  return regionCache.map || {};
+}
+
 // ── ดึงกล้องทั้งหมด ───────────────────────────────────────────────────────────
 // artemis จำกัด pageSize ไม่เกิน 500 — ถ้าขอมากกว่านั้นไล่ดึงทีละหน้าจนครบ
 async function getCameras(pageNo = 1, pageSize = 100) {
@@ -108,7 +150,8 @@ async function getCameras(pageNo = 1, pageSize = 100) {
     if (list.length < per || (total && all.length >= total)) break;
     page += 1;
   }
-  return formatCameras(all.slice(0, pageSize));
+  const regionMap = await getRegionMap();
+  return formatCameras(all.slice(0, pageSize), regionMap);
 }
 
 // ── ดึงสถานะกล้องตาม indexCode ────────────────────────────────────────────────
@@ -123,11 +166,15 @@ async function getCameraStatus(indexCode) {
   };
 }
 
-// ── ดึงกล้องตามพื้นที่ (regionIndexCode) ──────────────────────────────────────
+// ── ดึงกล้องตามพื้นที่ (regionIndexCode หรือชื่อ region) ──────────────────────
 async function getCamerasByArea(areaId) {
-  const data = await hikPost('/artemis/api/resource/v1/cameras', { pageNo: 1, pageSize: 500 });
-  const list = (data?.list || []).filter((c) => String(c.regionIndexCode) === String(areaId));
-  return formatCameras(list);
+  const data      = await hikPost('/artemis/api/resource/v1/cameras', { pageNo: 1, pageSize: 500 });
+  const regionMap = await getRegionMap();
+  const list = (data?.list || []).filter((c) =>
+    String(c.regionIndexCode) === String(areaId) ||
+    (regionMap[String(c.regionIndexCode)] || '') === String(areaId)
+  );
+  return formatCameras(list, regionMap);
 }
 
 // ── ดึง Event ล่าสุด ──────────────────────────────────────────────────────────
@@ -152,13 +199,15 @@ function isOnline(cam) {
 }
 
 // ── แปลงข้อมูลกล้องให้อ่านง่าย ────────────────────────────────────────────────
-function formatCameras(list) {
+// regionMap: { indexCode: name } — แปลง regionIndexCode ตัวเลขเป็นชื่อพื้นที่จริง
+function formatCameras(list, regionMap = {}) {
   return list.map((cam) => {
     const online = isOnline(cam);
+    const regionName = regionMap[String(cam.regionIndexCode)] || null;
     return {
       id:           cam.cameraIndexCode || cam.indexCode || cam.id,
       name:         cam.cameraName || cam.name || 'N/A',
-      location:     cam.regionIndexCode || cam.areaName || 'N/A',
+      location:     regionName || cam.areaName || cam.regionIndexCode || 'N/A',
       status:       online ? '🟢 ออนไลน์' : '🔴 ออฟไลน์',
       online,
       offlineSince: null, // artemis camera list ไม่มี offlineTime
@@ -181,6 +230,7 @@ module.exports = {
   getCameras,
   getCameraStatus,
   getCamerasByArea,
+  getRegions,
   getEvents,
   healthCheck,
 };

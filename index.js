@@ -313,10 +313,11 @@ const apHasIssue = (a) => a.isProblem === true || a.status === 'down';
 async function gatherAnalyzeContext(type, name, ip) {
   // Layer 2: ดึง AP (Omada) + กล้อง (HikCentral/Zabbix) พร้อมกัน — ตัวที่ fail ข้าม
   const [apsR, camsR] = await Promise.allSettled([
-    omada ? omada.getAPs() : Promise.resolve([]),
+    omada ? omada.getAPs() : Promise.resolve(null),
     getCamerasWithCache(),
   ]);
-  const aps  = apsR.status  === 'fulfilled' ? (apsR.value  || []) : [];
+  // getAPs คืน { aps, switches, gateways, all } — context นี้ใช้เฉพาะ AP ตามเดิม
+  const aps  = apsR.status  === 'fulfilled' ? (apsR.value?.aps || []) : [];
   const cams = camsR.status === 'fulfilled' ? (camsR.value || []) : [];
 
   const apLine  = (a) => `${a.name} (${a.ip || '-'}) ${apHasIssue(a) ? 'down' : 'up'}`;
@@ -397,6 +398,8 @@ const COMMAND_MAP = {
   cameraOff: ['กล้องดับ', 'camera offline', 'กล้องออฟไลน์'],
   wifi:      ['wifi', 'wi-fi', 'ap', 'wireless', 'ไวไฟ', 'access point', 'wlan'],
   client:    ['client', 'clients', 'ลูกค้า', 'จำนวน client'],
+  metric:    ['metric', 'metrics', 'สถิติ'],
+  port:      ['port', 'ports', 'พอร์ต'],
   summary:   ['ทั้งหมด', 'all', 'สรุป', 'summary', 'overview', 'dashboard'],
   status:    ['status', 'สถานะระบบ', 'monitor status'],
   listuser:  ['listuser', 'users', 'รายชื่อ user', 'ดู user', 'list user'],
@@ -724,6 +727,31 @@ async function route(text, rawText, userId, replyToken) {
     ]);
   }
 
+  // ── port:<mac> [หน้า] — ระดับ 2 ของคำสั่ง "port" (กดแถว switch จากการ์ด) ─────
+  if (text.startsWith('port:')) {
+    if (!auth.canExecute(userId, 'wifi')) return reply(replyToken, fmt.buildError('คุณไม่มีสิทธิ์ใช้คำสั่งนี้'));
+    if (!omada) return reply(replyToken, fmt.buildError('Omada ยังไม่เปิดใช้งาน'));
+
+    const arg  = text.slice('port:'.length).trim();
+    const m    = arg.match(/^([0-9a-f:\-]+)\s*(\d+)?$/i);
+    const mac  = (m?.[1] || '').toUpperCase().replace(/:/g, '-');
+    const page = m?.[2] ? parseInt(m[2], 10) : 1;
+    if (!mac) return reply(replyToken, fmt.buildError('รูปแบบไม่ถูกต้อง — พิมพ์ "port" เพื่อเลือก switch'));
+
+    const [netData, ports] = await Promise.all([omada.getAPs(), omada.getSwitchPorts(mac)]);
+    const sw = (netData.switches || []).find((s) => String(s.mac).toUpperCase().replace(/:/g, '-') === mac);
+
+    const pg      = paginate(ports, page);
+    const portMsg = fmt.buildSwitchPorts(sw?.name || mac, pg.items, pg, ports, { pageCmd: `port:${mac}` });
+    const safeMsg = flexOversize(portMsg)
+      ? fmt.buildSwitchPorts(sw?.name || mac, pg.items.slice(0, 5), pg, ports, { pageCmd: `port:${mac}` })
+      : portMsg;
+
+    return reply(replyToken, safeMsg, [
+      { type: 'action', action: { type: 'message', label: '↩ เลือก switch อื่น', text: 'port' } },
+    ]);
+  }
+
   // ── Matched commands ────────────────────────────────────────────────────────
   const cmd = matchCommand(text);
 
@@ -876,20 +904,23 @@ async function route(text, rawText, userId, replyToken) {
     case 'wifi': {
       if (!auth.canExecute(userId, 'wifi')) return reply(replyToken, fmt.buildError('คุณไม่มีสิทธิ์ใช้คำสั่งนี้'));
       if (!omada) return reply(replyToken, fmt.buildError('Omada ยังไม่เปิดใช้งาน'));
-      const aps = await omada.getAPs();
-      const wifiOffline = aps.filter((a) => a.isProblem);
-      const wifiCtxText = `AP ทั้งหมด ${aps.length} เครื่อง ปกติ ${aps.filter((a) => !a.isProblem).length} มีปัญหา ${wifiOffline.length}` +
-        (wifiOffline.length > 0 ? `: ${wifiOffline.slice(0, 10).map((a) => a.name).join(', ')}` : '');
+      const { aps, switches, gateways } = await omada.getAPs();
+      // เรียง Gateway → Switch → AP ให้อุปกรณ์โครงสร้างขึ้นก่อน — paginate ต่อเนื่องทั้งชุด
+      const devices     = [...gateways, ...switches, ...aps];
+      const wifiOffline = devices.filter((d) => d.status === 'down');
+      const wifiCtxText = `อุปกรณ์เครือข่าย: AP ${aps.length}, Switch ${switches.length}, Gateway ${gateways.length}` +
+        ` — ปกติ ${devices.length - wifiOffline.length} มีปัญหา ${wifiOffline.length}` +
+        (wifiOffline.length > 0 ? `: ${wifiOffline.slice(0, 10).map((d) => `${d.name}(${d.type})`).join(', ')}` : '');
 
       // Pagination: ครั้งละ 8 — "wifi 2" = หน้า 2
-      const pg = paginate(aps, parsePage(text));
+      const pg = paginate(devices, parsePage(text));
       userLastWifiCtx.set(userId, { text: wifiCtxText, page: pg.page, setAt: Date.now() });
 
-      const wifiTitle = pg.totalPages > 1 ? `สถานะ Access Point (หน้า ${pg.page}/${pg.totalPages})` : 'สถานะ Access Point';
-      const wifiOpts = { statsFrom: aps, deviceType: 'ap', pageCmd: 'wifi', pg };
-      const wifiMsg  = fmt.buildHosts(pg.items, null, wifiTitle, '📶', 'วิเคราะห์ wifi', wifiOpts);
+      const wifiTitle = pg.totalPages > 1 ? `อุปกรณ์เครือข่าย (หน้า ${pg.page}/${pg.totalPages})` : 'อุปกรณ์เครือข่าย';
+      const wifiOpts = { statsFrom: devices, pageCmd: 'wifi', pg };
+      const wifiMsg  = fmt.buildNetworkDevices(pg.items, wifiTitle, 'วิเคราะห์ wifi', wifiOpts);
       const safeWifi = flexOversize(wifiMsg)
-        ? fmt.buildHosts(pg.items.slice(0, 5), null, wifiTitle, '📶', 'วิเคราะห์ wifi', wifiOpts)
+        ? fmt.buildNetworkDevices(pg.items.slice(0, 5), wifiTitle, 'วิเคราะห์ wifi', wifiOpts)
         : wifiMsg;
       return reply(replyToken, safeWifi);
     }
@@ -897,13 +928,60 @@ async function route(text, rawText, userId, replyToken) {
     case 'client': {
       if (!auth.canExecute(userId, 'client')) return reply(replyToken, fmt.buildError('คุณไม่มีสิทธิ์ใช้คำสั่งนี้'));
       if (!omada) return reply(replyToken, fmt.buildError('Omada ยังไม่เปิดใช้งาน'));
-      const clients = await omada.getClients();
-      if (clients.unavailable) {
+      const clientData = await omada.getClients();
+      if (clientData.unavailable) {
         return reply(replyToken, fmt.buildError('ดึงข้อมูล Client จาก Omada ไม่ได้ชั่วคราว ลองใหม่อีกครั้ง'));
       }
-      return reply(replyToken, fmt.buildAiResponse(
-        `👥 Client ที่เชื่อมต่ออยู่\n📶 Wireless: ${clients.wireless}\n🔌 Wired: ${clients.wired}\n📊 รวม: ${clients.total}`
-      ));
+
+      // Pagination: ครั้งละ 8 — "client 2" = หน้า 2
+      const pg = paginate(clientData.clients, parsePage(text));
+      const clientOpts = { pageCmd: 'client', pg };
+      const clientMsg  = fmt.buildClients(pg.items, clientData, clientOpts);
+      const safeClient = flexOversize(clientMsg)
+        ? fmt.buildClients(pg.items.slice(0, 5), clientData, clientOpts)
+        : clientMsg;
+      return reply(replyToken, safeClient);
+    }
+
+    case 'port': {
+      if (!auth.canExecute(userId, 'wifi')) return reply(replyToken, fmt.buildError('คุณไม่มีสิทธิ์ใช้คำสั่งนี้'));
+      if (!omada) return reply(replyToken, fmt.buildError('Omada ยังไม่เปิดใช้งาน'));
+      const { switches } = await omada.getAPs();
+      if (!switches.length) return reply(replyToken, fmt.buildError('ไม่พบ Switch ใน site นี้'));
+      return reply(replyToken, fmt.buildSwitchPicker(switches));
+    }
+
+    case 'metric': {
+      if (!auth.canExecute(userId, 'host')) return reply(replyToken, fmt.buildError('คุณไม่มีสิทธิ์ใช้คำสั่งนี้'));
+      if (!zabbix) return reply(replyToken, fmt.buildError('Zabbix ยังไม่เปิดใช้งาน'));
+
+      // ดึงชื่อ host หลัง keyword — ใช้ rawText กัน toLowerCase ทำลายชื่อ host
+      const metricArg = _raw.replace(/^(metrics?|สถิติ)\s*/i, '').trim();
+      if (!metricArg) {
+        return reply(replyToken, fmt.buildAiResponse(
+          '📈 ดู CPU / RAM / Disk ของ host\n\nพิมพ์: metric <ชื่อ host>\nเช่น: metric SRV-CORE-01\nหรือ: สถิติ <ชื่อ host>'
+        ));
+      }
+
+      const found = await zabbix.findHosts(metricArg);
+      if (!found.length) {
+        return reply(replyToken, fmt.buildError(`ไม่พบ host ที่ชื่อมี "${metricArg}" — พิมพ์ "host" เพื่อดูรายชื่อ`));
+      }
+
+      // เจอหลายเครื่องและไม่มีชื่อตรงเป๊ะ → ให้เลือกก่อน
+      const exact = found.find((h) => h.name.toLowerCase() === metricArg.toLowerCase());
+      if (!exact && found.length > 1) {
+        return reply(replyToken, fmt.buildHostPicker(metricArg, found.slice(0, 8)));
+      }
+
+      const target  = exact || found[0];
+      const metrics = await zabbix.getHostMetrics(target.id);
+      if (!metrics.cpu && !metrics.memory && !metrics.disk) {
+        return reply(replyToken, fmt.buildError(
+          `host "${target.name}" ไม่มี item CPU/RAM/Disk ตาม key มาตรฐาน (system.cpu.util, vm.memory.size[pavailable], vfs.fs.size[/,pused])`
+        ));
+      }
+      return reply(replyToken, fmt.buildHostMetrics(target.name, target.ip, metrics));
     }
 
     case 'summary': {
@@ -919,7 +997,8 @@ async function route(text, rawText, userId, replyToken) {
       const allData = {
         zabbix: zData.status === 'fulfilled' ? zData.value : null,
         omada: {
-          aps:     apsResult.status === 'fulfilled' ? (apsResult.value || null) : null,
+          // getAPs คืน { aps, switches, gateways, all } — summary card ใช้เฉพาะ aps ตามเดิม
+          aps:     apsResult.status === 'fulfilled' ? (apsResult.value?.aps || null) : null,
           clients: clientsResult.status === 'fulfilled' ? (clientsResult.value || null) : null,
         },
         hik:    hData.status === 'fulfilled' ? { cameras: hData.value } : null,
