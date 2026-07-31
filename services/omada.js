@@ -108,12 +108,30 @@ function extractList(result) {
   return Array.isArray(result) ? result : (result?.data || []);
 }
 
+// ── ดึงทุกหน้าจนครบ (Omada จำกัด pageSize สูงสุด 100 ต่อ request) ─────────────
+// pathFn(page) → absolute path ของหน้านั้น — วนจนหน้าสุดท้ายหรือครบ totalRows
+const OMADA_PAGE_SIZE = 100;
+const OMADA_MAX_PAGES = 50; // กันชน — ไม่เกิน 5,000 รายการ
+
+async function omadaGetAll(pathFn) {
+  const all = [];
+  for (let page = 1; page <= OMADA_MAX_PAGES; page++) {
+    const result = await omadaGet(pathFn(page));
+    const list   = extractList(result);
+    all.push(...list);
+    const total = Array.isArray(result) ? result.length : Number(result?.totalRows ?? 0);
+    if (list.length < OMADA_PAGE_SIZE || (total && all.length >= total)) break;
+  }
+  return all;
+}
+
 // ── ดึงอุปกรณ์ทั้งหมด แยกตามประเภท ───────────────────────────────────────────
 // GET /openapi/v1/{omadacId}/sites/{siteId}/devices — คืน AP + Switch + Gateway รวมกัน
 // คืน { aps, switches, gateways, all } — all คือทุก type รวม type ที่ไม่รู้จัก
 async function getAPs(siteId = SITE_ID) {
-  const result = await omadaGet(`/openapi/v1/${OMADAC_ID}/sites/${siteId}/devices?pageSize=100&page=1`);
-  const all    = extractList(result).map((d) => ({
+  const raw = await omadaGetAll((page) =>
+    `/openapi/v1/${OMADAC_ID}/sites/${siteId}/devices?pageSize=${OMADA_PAGE_SIZE}&page=${page}`);
+  const all = raw.map((d) => ({
     name:   d.name,
     ip:     d.ip,
     status: d.status === 1 ? 'up' : 'down',
@@ -137,15 +155,15 @@ async function getAPs(siteId = SITE_ID) {
 // ถ้าล้มเหลวคืนค่าเปล่า (unavailable) แทน throw เพื่อไม่ให้คำสั่ง client/summary พังทั้งหมด
 // คืน { total, wireless, wired, clients } — clients มีรายละเอียดรายตัว
 async function getClients(siteId = SITE_ID) {
-  let result = null;
+  let data = null;
   try {
-    result = await omadaGet(`/openapi/v1/${OMADAC_ID}/sites/${siteId}/clients?pageSize=100&page=1`);
+    data = await omadaGetAll((page) =>
+      `/openapi/v1/${OMADAC_ID}/sites/${siteId}/clients?pageSize=${OMADA_PAGE_SIZE}&page=${page}`);
   } catch (err) {
     logger.warn(`omada: getClients ล้มเหลว: ${err.message}`);
     return { total: 0, wireless: 0, wired: 0, clients: [], unavailable: true };
   }
-  const data  = extractList(result);
-  const total = Array.isArray(result) ? result.length : (result?.totalRows ?? data.length);
+  const total = data.length;
 
   // field ชื่อไม่เท่ากันตามรุ่น controller — เผื่อ fallback ทั้ง camelCase หลัก ๆ
   const clients = data.map((c) => ({

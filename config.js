@@ -18,7 +18,7 @@ const MONITORS = {
     name: 'Omada WiFi',
     type: 'omada',
     adapterModule: './adapters/omada',
-    requiredEnv: ['OMADA_URL', 'OMADA_USERNAME', 'OMADA_PASSWORD', 'OMADA_SITE_ID'],
+    requiredEnv: ['OMADA_URL', 'OMADA_OMADAC_ID', 'OMADA_CLIENT_ID', 'OMADA_CLIENT_SECRET', 'OMADA_SITE_ID'],
   },
   hikcentral: {
     enabled: true,

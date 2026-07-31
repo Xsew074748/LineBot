@@ -4,8 +4,8 @@ const fs         = require('fs');
 const path       = require('path');
 const axios      = require('axios');
 const auth       = require('../middleware/setupAuth');
-// testConnection: ฟังก์ชัน test ของ Omada — ใช้ flow เดียวกับ service จริง
-// (GET /api/info → POST /{omadacId}/api/v2/login) + httpsAgent เดียวกัน
+// testConnection: ฟังก์ชัน test ของ Omada — Open API client credentials flow
+// เดียวกับ service จริง (POST /openapi/authorize/token) + httpsAgent เดียวกัน
 const { testConnection: omadaTestConn } = require('../services/omada');
 // healthCheck: ทดสอบ HikCentral ด้วย AK/SK signature flow เดียวกับ service จริง
 const hik = require('../services/hikcentral');
@@ -27,6 +27,11 @@ function readEnv() {
 }
 
 function writeEnv(updates) {
+  // กัน env injection — ค่าที่มี newline ตรงกลางจะกลายเป็น key ใหม่ใน .env ได้
+  for (const k of Object.keys(updates)) {
+    updates[k] = String(updates[k]).replace(/[\r\n]/g, ' ');
+  }
+
   let lines = [];
   try { lines = fs.readFileSync(ENV_PATH, 'utf8').split(/\r?\n/); } catch {}
 
@@ -86,17 +91,18 @@ router.get('/current', (req, res) => {
       apiToken: { masked: mask(e.ZABBIX_API_TOKEN), set: !!e.ZABBIX_API_TOKEN },
     },
     omada: {
-      enabled:  e.OMADA_ENABLED !== 'false' && !!e.OMADA_URL,
-      url:      e.OMADA_URL      || '',
-      username: e.OMADA_USERNAME || '',
-      siteId:   e.OMADA_SITE_ID  || '',
-      password: { masked: mask(e.OMADA_PASSWORD), set: !!e.OMADA_PASSWORD },
+      enabled:      e.OMADA_ENABLED !== 'false' && !!e.OMADA_URL,
+      url:          e.OMADA_URL       || '',
+      omadacId:     e.OMADA_OMADAC_ID || '',
+      siteId:       e.OMADA_SITE_ID   || '',
+      clientId:     e.OMADA_CLIENT_ID || '',
+      clientSecret: { masked: mask(e.OMADA_CLIENT_SECRET), set: !!e.OMADA_CLIENT_SECRET },
     },
     hikcentral: {
-      enabled:      e.HIKCENTRAL_ENABLED !== 'false' && !!e.HIKCENTRAL_URL,
-      url:          e.HIKCENTRAL_URL           || '',
-      clientId:     e.HIKCENTRAL_CLIENT_ID     || '',
-      clientSecret: { masked: mask(e.HIKCENTRAL_CLIENT_SECRET), set: !!e.HIKCENTRAL_CLIENT_SECRET },
+      enabled:   e.HIKCENTRAL_ENABLED !== 'false' && !!e.HIKCENTRAL_URL,
+      url:       e.HIKCENTRAL_URL      || '',
+      appKey:    e.HIKCENTRAL_APP_KEY  || '',
+      appSecret: { masked: mask(e.HIKCENTRAL_APP_SECRET), set: !!e.HIKCENTRAL_APP_SECRET },
     },
     claude: {
       apiKey: { masked: mask(e.ANTHROPIC_API_KEY), set: !!e.ANTHROPIC_API_KEY },
@@ -128,18 +134,19 @@ router.post('/save', (req, res) => {
   set('ZABBIX_URL',       b.zabbixUrl);
   set('ZABBIX_API_TOKEN', b.zabbixApiToken);
 
-  // Omada
+  // Omada (Open API — OAuth2 client credentials)
   if (b.omadaEnabled !== undefined) updates['OMADA_ENABLED'] = b.omadaEnabled ? 'true' : 'false';
-  set('OMADA_URL',      b.omadaUrl);
-  set('OMADA_USERNAME', b.omadaUsername);
-  set('OMADA_PASSWORD', b.omadaPassword);
-  set('OMADA_SITE_ID',  b.omadaSiteId);
+  set('OMADA_URL',           b.omadaUrl);
+  set('OMADA_OMADAC_ID',     b.omadaOmadacId);
+  set('OMADA_CLIENT_ID',     b.omadaClientId);
+  set('OMADA_CLIENT_SECRET', b.omadaClientSecret);
+  set('OMADA_SITE_ID',       b.omadaSiteId);
 
-  // HikCentral
+  // HikCentral (AK/SK)
   if (b.hikcentralEnabled !== undefined) updates['HIKCENTRAL_ENABLED'] = b.hikcentralEnabled ? 'true' : 'false';
-  set('HIKCENTRAL_URL',           b.hikcentralUrl);
-  set('HIKCENTRAL_CLIENT_ID',     b.hikcentralClientId);
-  set('HIKCENTRAL_CLIENT_SECRET', b.hikcentralClientSecret);
+  set('HIKCENTRAL_URL',        b.hikcentralUrl);
+  set('HIKCENTRAL_APP_KEY',    b.hikcentralAppKey);
+  set('HIKCENTRAL_APP_SECRET', b.hikcentralAppSecret);
 
   // Claude
   set('ANTHROPIC_API_KEY', b.claudeApiKey);
@@ -189,12 +196,11 @@ router.post('/test', async (req, res) => {
     }
 
     if (svc === 'omada') {
-      const url  = get('url', 'OMADA_URL');
-      const user = get('username', 'OMADA_USERNAME');
-      const pass = get('password', 'OMADA_PASSWORD');
-      if (!url || !user || !pass) return res.json({ ok: false, message: 'กรุณากรอก URL, Username และ Password' });
+      // Open API ใช้ OMADAC_ID/CLIENT_ID/CLIENT_SECRET จาก .env (service อ่านตอนโหลดโมดูล)
+      const url = get('url', 'OMADA_URL');
+      if (!url) return res.json({ ok: false, message: 'กรุณากรอก URL' });
       // ใช้ testConnection จาก service — flow และ httpsAgent เดียวกับที่ใช้จริง
-      return res.json(await omadaTestConn(url, user, pass));
+      return res.json(await omadaTestConn(url));
     }
 
     if (svc === 'hikcentral') {

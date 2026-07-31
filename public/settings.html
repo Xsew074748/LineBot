@@ -215,17 +215,23 @@ header h1 { font-size: 17px; font-weight: 700; display: flex; align-items: cente
         </div>
       </div>
       <div class="field">
-        <div class="field-label">Username</div>
+        <div class="field-label">Omadac ID</div>
         <div class="field-row">
-          <input type="text" id="omadaUsername" placeholder="admin">
+          <input type="text" id="omadaOmadacId" placeholder="Omadac ID (จากหน้า Open API)">
         </div>
       </div>
       <div class="field">
-        <div class="field-label">Password</div>
+        <div class="field-label">Client ID</div>
         <div class="field-row">
-          <input type="password" id="omadaPassword" class="locked" placeholder="ยังไม่ได้ตั้งค่า" readonly>
-          <button class="btn-icon" onclick="editField('omadaPassword')" title="แก้ไข">✏️</button>
-          <button class="btn-icon" onclick="toggleVis('omadaPassword')" title="แสดง/ซ่อน">👁</button>
+          <input type="text" id="omadaClientId" placeholder="Client ID (Open API)">
+        </div>
+      </div>
+      <div class="field">
+        <div class="field-label">Client Secret</div>
+        <div class="field-row">
+          <input type="password" id="omadaClientSecret" class="locked" placeholder="ยังไม่ได้ตั้งค่า" readonly>
+          <button class="btn-icon" onclick="editField('omadaClientSecret')" title="แก้ไข">✏️</button>
+          <button class="btn-icon" onclick="toggleVis('omadaClientSecret')" title="แสดง/ซ่อน">👁</button>
         </div>
       </div>
       <div class="field">
@@ -256,17 +262,17 @@ header h1 { font-size: 17px; font-weight: 700; display: flex; align-items: cente
         </div>
       </div>
       <div class="field">
-        <div class="field-label">Client ID</div>
+        <div class="field-label">App Key (AK)</div>
         <div class="field-row">
-          <input type="text" id="hikcentralClientId" placeholder="Client ID">
+          <input type="text" id="hikcentralAppKey" placeholder="App Key จาก OpenAPI">
         </div>
       </div>
       <div class="field">
-        <div class="field-label">Client Secret</div>
+        <div class="field-label">App Secret (SK)</div>
         <div class="field-row">
-          <input type="password" id="hikcentralClientSecret" class="locked" placeholder="ยังไม่ได้ตั้งค่า" readonly>
-          <button class="btn-icon" onclick="editField('hikcentralClientSecret')" title="แก้ไข">✏️</button>
-          <button class="btn-icon" onclick="toggleVis('hikcentralClientSecret')" title="แสดง/ซ่อน">👁</button>
+          <input type="password" id="hikcentralAppSecret" class="locked" placeholder="ยังไม่ได้ตั้งค่า" readonly>
+          <button class="btn-icon" onclick="editField('hikcentralAppSecret')" title="แก้ไข">✏️</button>
+          <button class="btn-icon" onclick="toggleVis('hikcentralAppSecret')" title="แสดง/ซ่อน">👁</button>
         </div>
       </div>
       <div class="test-row">
@@ -332,10 +338,11 @@ async function loadConfig() {
     // Plain text fields
     setVal('zabbixUrl',          d.zabbix?.url || '');
     setVal('omadaUrl',           d.omada?.url  || '');
-    setVal('omadaUsername',      d.omada?.username || '');
+    setVal('omadaOmadacId',      d.omada?.omadacId || '');
+    setVal('omadaClientId',      d.omada?.clientId || '');
     setVal('omadaSiteId',        d.omada?.siteId   || '');
-    setVal('hikcentralUrl',      d.hikcentral?.url      || '');
-    setVal('hikcentralClientId', d.hikcentral?.clientId || '');
+    setVal('hikcentralUrl',      d.hikcentral?.url    || '');
+    setVal('hikcentralAppKey',   d.hikcentral?.appKey || '');
     // Toggle states
     setChecked('omadaEnabled',      d.omada?.enabled      || false);
     setChecked('hikcentralEnabled', d.hikcentral?.enabled || false);
@@ -343,8 +350,8 @@ async function loadConfig() {
     setMasked('lineChannelSecret',      d.line?.channelSecret);
     setMasked('lineChannelAccessToken', d.line?.channelAccessToken);
     setMasked('zabbixApiToken',         d.zabbix?.apiToken);
-    setMasked('omadaPassword',          d.omada?.password);
-    setMasked('hikcentralClientSecret', d.hikcentral?.clientSecret);
+    setMasked('omadaClientSecret',      d.omada?.clientSecret);
+    setMasked('hikcentralAppSecret',    d.hikcentral?.appSecret);
     setMasked('claudeApiKey',           d.claude?.apiKey);
   } catch(e) {
     showAlert('topAlert', 'warn', '⚠️ ไม่สามารถโหลดค่าปัจจุบันได้: ' + e.message);
@@ -418,8 +425,8 @@ function buildTestPayload(svc) {
   return {
     line:       { channelAccessToken: unlocked('lineChannelAccessToken') },
     zabbix:     { url: getVal('zabbixUrl'), apiToken: unlocked('zabbixApiToken') },
-    omada:      { url: getVal('omadaUrl'), username: getVal('omadaUsername'), password: unlocked('omadaPassword') },
-    hikcentral: { url: getVal('hikcentralUrl'), clientId: getVal('hikcentralClientId'), clientSecret: unlocked('hikcentralClientSecret') },
+    omada:      { url: getVal('omadaUrl') },
+    hikcentral: { url: getVal('hikcentralUrl') },
     claude:     { apiKey: unlocked('claudeApiKey') },
   }[svc] || {};
 }
@@ -438,13 +445,14 @@ async function saveAll() {
     zabbixApiToken:         editedFields.has('zabbixApiToken')         ? getVal('zabbixApiToken')         : '',
     omadaEnabled:           document.getElementById('omadaEnabled')?.checked,
     omadaUrl:               getVal('omadaUrl'),
-    omadaUsername:          getVal('omadaUsername'),
-    omadaPassword:          editedFields.has('omadaPassword')          ? getVal('omadaPassword')          : '',
+    omadaOmadacId:          getVal('omadaOmadacId'),
+    omadaClientId:          getVal('omadaClientId'),
+    omadaClientSecret:      editedFields.has('omadaClientSecret')      ? getVal('omadaClientSecret')      : '',
     omadaSiteId:            getVal('omadaSiteId'),
     hikcentralEnabled:      document.getElementById('hikcentralEnabled')?.checked,
     hikcentralUrl:          getVal('hikcentralUrl'),
-    hikcentralClientId:     getVal('hikcentralClientId'),
-    hikcentralClientSecret: editedFields.has('hikcentralClientSecret') ? getVal('hikcentralClientSecret') : '',
+    hikcentralAppKey:       getVal('hikcentralAppKey'),
+    hikcentralAppSecret:    editedFields.has('hikcentralAppSecret')    ? getVal('hikcentralAppSecret')    : '',
     claudeApiKey:           editedFields.has('claudeApiKey')           ? getVal('claudeApiKey')           : '',
     setupPassword:          getVal('setupPassword'),
   };

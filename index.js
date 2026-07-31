@@ -108,7 +108,14 @@ async function withAI(userId, replyToken, aiCall) {
       `ใช้ AI ครบโควต้าวันนี้แล้ว (${check.used}/${check.limit} ครั้ง) — รีเซ็ตพรุ่งนี้`
     ));
   }
-  const result = await aiCall();
+  // AI ล้มเหลว (ai.js throw หลัง retry ครบ) → แจ้ง user โดยไม่หัก quota
+  let result;
+  try {
+    result = await aiCall();
+  } catch (err) {
+    logger.warn(`withAI: AI ล้มเหลว ไม่หัก quota (userId=${userId}): ${err.message}`);
+    return reply(replyToken, fmt.buildError('AI ไม่ว่างในขณะนี้ กรุณาลองใหม่ในอีกสักครู่ (ไม่นับโควต้า)'));
+  }
   auth.incrementAIUsage(userId);
   return result;
 }
@@ -863,7 +870,7 @@ async function route(text, rawText, userId, replyToken) {
 
       const siteMsg = fmt.buildCameraSites(siteStats, 'วิเคราะห์กล้อง');
       const safeCam = flexOversize(siteMsg)
-        ? fmt.buildCameraSites(siteStats.slice(0, 8), 'วิเคราะห์กล้อง')
+        ? fmt.buildCameraSites(siteStats.slice(0, 5), 'วิเคราะห์กล้อง')
         : siteMsg;
 
       const siteQR = siteStats.slice(0, 8).map((s) => ({
@@ -1181,8 +1188,17 @@ async function reply(replyToken, flexContents, extraQR = []) {
         messages: [{ type: 'flex', altText: ALT_TEXT, contents: flexContents }],
       });
     } catch (err2) {
-      logger.error('reply: ล้มเหลวทั้ง 2 ครั้ง', err2);
+      logger.error('reply: ล้มเหลวทั้ง 2 ครั้ง — ส่ง text fallback', err2);
       if (err2.body) logger.error(`reply: LINE error body=${err2.body}`);
+      // Flex ถูก reject ทั้ง 2 รอบ (เช่น payload เกิน/format ผิด) — อย่าปล่อยให้ user เงียบ
+      try {
+        await lineClient.replyMessage({
+          replyToken,
+          messages: [{ type: 'text', text: 'ขออภัย เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง' }],
+        });
+      } catch (err3) {
+        logger.error('reply: text fallback ก็ล้มเหลว (replyToken อาจหมดอายุ)', err3);
+      }
     }
   }
 }
@@ -1205,7 +1221,15 @@ async function replyCustomQR(replyToken, flexContents, qrItems) {
     try {
       await lineClient.replyMessage({ replyToken, messages: [{ type: 'flex', altText: ALT_TEXT, contents: flexContents }] });
     } catch (err2) {
-      logger.error('replyCustomQR: failed', err2);
+      logger.error('replyCustomQR: failed — ส่ง text fallback', err2);
+      try {
+        await lineClient.replyMessage({
+          replyToken,
+          messages: [{ type: 'text', text: 'ขออภัย เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง' }],
+        });
+      } catch (err3) {
+        logger.error('replyCustomQR: text fallback ก็ล้มเหลว', err3);
+      }
     }
   }
 }

@@ -29,6 +29,7 @@ const CORRELATION_SYSTEM_PROMPT = `คุณคือผู้ช่วยวิ
 4. ปิดท้ายทุกครั้งด้วย: "⚠️ นี่คือการวิเคราะห์เบื้องต้นโดย AI โปรดตรวจสอบหน้างานก่อนดำเนินการ"`;
 
 // ── Internal: ยิง Claude API พร้อม retry 1 ครั้ง ────────────────────────────────
+// ล้มเหลวทั้ง 2 ครั้ง → throw ให้ caller จัดการ (withAI จะไม่หัก quota)
 async function callClaude(systemPrompt, userPrompt, maxTokens = 500) {
   const start = Date.now();
   for (let attempt = 1; attempt <= 2; attempt++) {
@@ -51,7 +52,7 @@ async function callClaude(systemPrompt, userPrompt, maxTokens = 500) {
         continue;
       }
       logger.error('ai: Claude API ล้มเหลวทั้ง 2 ครั้ง', err);
-      return '❌ AI ไม่ว่างในขณะนี้ กรุณาลองใหม่ในอีกสักครู่';
+      throw err;
     }
   }
 }

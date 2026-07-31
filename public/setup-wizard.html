@@ -290,16 +290,23 @@ header .actions { display: flex; gap: 10px; }
               </div>
             </div>
             <div class="field">
-              <label>Username <span class="req">*</span></label>
+              <label>Omadac ID <span class="req">*</span></label>
               <div class="input-wrap">
-                <input type="text" id="omadaUsername" placeholder="admin">
+                <input type="text" id="omadaOmadacId" placeholder="Omadac ID">
+              </div>
+              <div class="field-hint">Omada → Settings → Platform Integration → Open API</div>
+            </div>
+            <div class="field">
+              <label>Client ID <span class="req">*</span></label>
+              <div class="input-wrap">
+                <input type="text" id="omadaClientId" placeholder="Client ID (Open API)">
               </div>
             </div>
             <div class="field">
-              <label>Password <span class="req">*</span></label>
+              <label>Client Secret <span class="req">*</span></label>
               <div class="input-wrap">
-                <input type="password" id="omadaPassword" placeholder="รหัสผ่าน Omada">
-                <button class="toggle-vis" onclick="toggleVis('omadaPassword')">👁</button>
+                <input type="password" id="omadaClientSecret" placeholder="Client Secret (Open API)">
+                <button class="toggle-vis" onclick="toggleVis('omadaClientSecret')">👁</button>
               </div>
             </div>
             <div class="field">
@@ -338,18 +345,18 @@ header .actions { display: flex; gap: 10px; }
               </div>
             </div>
             <div class="field">
-              <label>Client ID <span class="req">*</span></label>
+              <label>App Key (AK) <span class="req">*</span></label>
               <div class="input-wrap">
-                <input type="text" id="hikcentralClientId" placeholder="Client ID จาก HikCentral">
+                <input type="text" id="hikcentralAppKey" placeholder="App Key จาก OpenAPI">
               </div>
             </div>
             <div class="field">
-              <label>Client Secret <span class="req">*</span></label>
+              <label>App Secret (SK) <span class="req">*</span></label>
               <div class="input-wrap">
-                <input type="password" id="hikcentralClientSecret" placeholder="Client Secret">
-                <button class="toggle-vis" onclick="toggleVis('hikcentralClientSecret')">👁</button>
+                <input type="password" id="hikcentralAppSecret" placeholder="App Secret">
+                <button class="toggle-vis" onclick="toggleVis('hikcentralAppSecret')">👁</button>
               </div>
-              <div class="field-hint">HikCentral → System → OpenAPI → สร้าง API key</div>
+              <div class="field-hint">HikCentral → System → OpenAPI → สร้าง Partner (AK/SK) แล้ว Approve + ผูก user</div>
             </div>
             <div class="test-row">
               <button class="btn-test" onclick="testService('hikcentral')">🔗 ทดสอบการเชื่อมต่อ</button>
@@ -437,10 +444,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     // Pre-fill non-sensitive fields
     if (d.zabbix?.url)           setVal('zabbixUrl', d.zabbix.url);
     if (d.omada?.url)            setVal('omadaUrl',  d.omada.url);
-    if (d.omada?.username)       setVal('omadaUsername', d.omada.username);
+    if (d.omada?.omadacId)       setVal('omadaOmadacId', d.omada.omadacId);
+    if (d.omada?.clientId)       setVal('omadaClientId', d.omada.clientId);
     if (d.omada?.siteId)         setVal('omadaSiteId',   d.omada.siteId);
-    if (d.hikcentral?.url)       setVal('hikcentralUrl',      d.hikcentral.url);
-    if (d.hikcentral?.clientId)  setVal('hikcentralClientId', d.hikcentral.clientId);
+    if (d.hikcentral?.url)       setVal('hikcentralUrl',    d.hikcentral.url);
+    if (d.hikcentral?.appKey)    setVal('hikcentralAppKey', d.hikcentral.appKey);
     // Restore toggle states
     if (d.omada?.enabled)      { setChecked('omadaEnabled',      true); toggleSection('omada'); }
     if (d.hikcentral?.enabled) { setChecked('hikcentralEnabled', true); toggleSection('hikcentral'); }
@@ -448,8 +456,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (d.line?.channelSecret?.set)       setPlaceholder('lineChannelSecret',      '(ตั้งค่าแล้ว — เว้นไว้ถ้าไม่ต้องการเปลี่ยน)');
     if (d.line?.channelAccessToken?.set)  setPlaceholder('lineChannelAccessToken', '(ตั้งค่าแล้ว — เว้นไว้ถ้าไม่ต้องการเปลี่ยน)');
     if (d.zabbix?.apiToken?.set)          setPlaceholder('zabbixApiToken',         '(ตั้งค่าแล้ว — เว้นไว้ถ้าไม่ต้องการเปลี่ยน)');
-    if (d.omada?.password?.set)           setPlaceholder('omadaPassword',           '(ตั้งค่าแล้ว — เว้นไว้ถ้าไม่ต้องการเปลี่ยน)');
-    if (d.hikcentral?.clientSecret?.set)  setPlaceholder('hikcentralClientSecret',  '(ตั้งค่าแล้ว — เว้นไว้ถ้าไม่ต้องการเปลี่ยน)');
+    if (d.omada?.clientSecret?.set)       setPlaceholder('omadaClientSecret',       '(ตั้งค่าแล้ว — เว้นไว้ถ้าไม่ต้องการเปลี่ยน)');
+    if (d.hikcentral?.appSecret?.set)     setPlaceholder('hikcentralAppSecret',     '(ตั้งค่าแล้ว — เว้นไว้ถ้าไม่ต้องการเปลี่ยน)');
     if (d.claude?.apiKey?.set)            setPlaceholder('claudeApiKey',            '(ตั้งค่าแล้ว — เว้นไว้ถ้าไม่ต้องการเปลี่ยน)');
   } catch(e) { console.warn('Could not load current config', e); }
 });
@@ -521,8 +529,8 @@ function buildTestBody(svc) {
   const m = {
     line:       { channelAccessToken: getVal('lineChannelAccessToken') },
     zabbix:     { url: getVal('zabbixUrl'), apiToken: getVal('zabbixApiToken') },
-    omada:      { url: getVal('omadaUrl'), username: getVal('omadaUsername'), password: getVal('omadaPassword') },
-    hikcentral: { url: getVal('hikcentralUrl'), clientId: getVal('hikcentralClientId'), clientSecret: getVal('hikcentralClientSecret') },
+    omada:      { url: getVal('omadaUrl') },
+    hikcentral: { url: getVal('hikcentralUrl') },
     claude:     { apiKey: getVal('claudeApiKey') },
   };
   return m[svc] || {};
@@ -561,13 +569,14 @@ async function saveAll() {
     zabbixApiToken:         getVal('zabbixApiToken'),
     omadaEnabled:           document.getElementById('omadaEnabled')?.checked,
     omadaUrl:               getVal('omadaUrl'),
-    omadaUsername:          getVal('omadaUsername'),
-    omadaPassword:          getVal('omadaPassword'),
+    omadaOmadacId:          getVal('omadaOmadacId'),
+    omadaClientId:          getVal('omadaClientId'),
+    omadaClientSecret:      getVal('omadaClientSecret'),
     omadaSiteId:            getVal('omadaSiteId'),
     hikcentralEnabled:      document.getElementById('hikcentralEnabled')?.checked,
     hikcentralUrl:          getVal('hikcentralUrl'),
-    hikcentralClientId:     getVal('hikcentralClientId'),
-    hikcentralClientSecret: getVal('hikcentralClientSecret'),
+    hikcentralAppKey:       getVal('hikcentralAppKey'),
+    hikcentralAppSecret:    getVal('hikcentralAppSecret'),
     claudeApiKey:           getVal('claudeApiKey'),
     setupPassword:          getVal('setupPassword'),
   };
