@@ -79,6 +79,20 @@ header .actions { display: flex; gap: 10px; }
 .field label .req { color: var(--red); margin-left: 3px; }
 .field label .opt { color: var(--gray-400); font-weight: 400; font-size: 11px; margin-left: 6px; }
 .field-hint { font-size: 12px; color: var(--gray-600); margin-top: 5px; line-height: 1.5; }
+
+/* ── Guide accordion — "วิธีหาค่านี้ ?" ── */
+details.guide-accordion { margin-top: 6px; font-size: 12.8px; }
+details.guide-accordion summary {
+  cursor: pointer; color: var(--teal); font-weight: 600; font-size: 12.8px;
+  list-style: none; display: inline-flex; align-items: center; gap: 4px;
+}
+details.guide-accordion summary::-webkit-details-marker { display: none; }
+details.guide-accordion summary::before { content: '▸'; font-size: 11px; transition: transform .15s; }
+details.guide-accordion[open] summary::before { transform: rotate(90deg); }
+details.guide-accordion summary:hover { color: var(--teal-d); }
+details.guide-accordion ol { padding-left: 1.2rem; margin-top: 8px; color: var(--gray-600); line-height: 1.8; }
+details.guide-accordion a { color: var(--teal); text-decoration: underline; }
+details.guide-accordion a:hover { color: var(--teal-d); }
 .input-wrap { position: relative; }
 .input-wrap input {
   width: 100%; padding: 10px 40px 10px 13px; border: 1.5px solid var(--gray-200);
@@ -222,6 +236,15 @@ header .actions { display: flex; gap: 10px; }
               <button class="toggle-vis" onclick="toggleVis('lineChannelSecret')">👁</button>
             </div>
             <div class="field-hint">ดูได้ที่ <strong>LINE Developers Console</strong> → เลือก Channel → Basic settings → Channel secret</div>
+            <details class="guide-accordion">
+              <summary>วิธีหาค่านี้ ?</summary>
+              <ol>
+                <li>เปิด <a href="https://developers.line.biz" target="_blank" rel="noopener">developers.line.biz</a></li>
+                <li>เลือก Provider → เลือก Channel ของคุณ</li>
+                <li>คลิกแท็บ "Basic settings"</li>
+                <li>เลื่อนลงหา "Channel secret" → กด Copy</li>
+              </ol>
+            </details>
           </div>
           <div class="field">
             <label>Channel Access Token <span class="req">*</span></label>
@@ -230,6 +253,16 @@ header .actions { display: flex; gap: 10px; }
               <button class="toggle-vis" onclick="toggleVis('lineChannelAccessToken')">👁</button>
             </div>
             <div class="field-hint">LINE Developers Console → Messaging API → Channel access token (long-lived)</div>
+            <details class="guide-accordion">
+              <summary>วิธีหาค่านี้ ?</summary>
+              <ol>
+                <li>เปิด <a href="https://developers.line.biz" target="_blank" rel="noopener">developers.line.biz</a></li>
+                <li>เลือก Provider → เลือก Channel ของคุณ</li>
+                <li>คลิกแท็บ "Messaging API"</li>
+                <li>เลื่อนลงหา "Channel access token (long-lived)"</li>
+                <li>กด "Issue" ถ้ายังไม่มี → กด Copy</li>
+              </ol>
+            </details>
           </div>
           <div class="test-row">
             <button class="btn-test" onclick="testService('line')">🔗 ทดสอบการเชื่อมต่อ</button>
@@ -253,6 +286,13 @@ header .actions { display: flex; gap: 10px; }
               <input type="text" id="zabbixUrl" placeholder="https://zabbix.example.com">
             </div>
             <div class="field-hint">URL ของ Zabbix web interface (ไม่ต้องใส่ /api_jsonrpc.php)</div>
+            <details class="guide-accordion">
+              <summary>วิธีหาค่านี้ ?</summary>
+              <ol>
+                <li>ใส่ URL ของ Zabbix เช่น https://192.168.1.10</li>
+                <li>ถ้าใช้ port พิเศษให้ใส่ด้วย เช่น http://192.168.1.10:8080</li>
+              </ol>
+            </details>
           </div>
           <div class="field">
             <label>API Token <span class="req">*</span></label>
@@ -261,6 +301,16 @@ header .actions { display: flex; gap: 10px; }
               <button class="toggle-vis" onclick="toggleVis('zabbixApiToken')">👁</button>
             </div>
             <div class="field-hint">Zabbix → Administration → API tokens → Create token</div>
+            <details class="guide-accordion">
+              <summary>วิธีหาค่านี้ ?</summary>
+              <ol>
+                <li>Login Zabbix → คลิกชื่อ User มุมบนขวา</li>
+                <li>เลือก "User settings" → แท็บ "API tokens"</li>
+                <li>คลิก "Create API token"</li>
+                <li>ตั้งชื่อ เช่น "NetGuard-AI" → คลิก "Add"</li>
+                <li>Copy Token ที่แสดงขึ้นมา (แสดงครั้งเดียว!)</li>
+              </ol>
+            </details>
           </div>
           <div class="test-row">
             <button class="btn-test" onclick="testService('zabbix')">🔗 ทดสอบการเชื่อมต่อ</button>
@@ -288,6 +338,13 @@ header .actions { display: flex; gap: 10px; }
               <div class="input-wrap">
                 <input type="text" id="omadaUrl" placeholder="https://omada.example.com:8043">
               </div>
+              <details class="guide-accordion">
+                <summary>วิธีหาค่านี้ ?</summary>
+                <ol>
+                  <li>ใส่ URL ของ Omada Controller เช่น https://192.168.1.10:8043</li>
+                  <li>ต้องเข้าถึงได้จาก server ที่รัน bot</li>
+                </ol>
+              </details>
             </div>
             <div class="field">
               <label>Omadac ID <span class="req">*</span></label>
@@ -295,6 +352,15 @@ header .actions { display: flex; gap: 10px; }
                 <input type="text" id="omadaOmadacId" placeholder="Omadac ID">
               </div>
               <div class="field-hint">Omada → Settings → Platform Integration → Open API</div>
+              <details class="guide-accordion">
+                <summary>วิธีหาค่านี้ ?</summary>
+                <ol>
+                  <li>Login Omada Controller</li>
+                  <li>ดู URL ในเบราว์เซอร์ จะเห็น /{omadacId}/</li>
+                  <li>เช่น https://192.168.1.10:8043/abc123.../</li>
+                  <li>ตัวอักษรหลัง port คือ Omada ID</li>
+                </ol>
+              </details>
             </div>
             <div class="field">
               <label>Client ID <span class="req">*</span></label>
@@ -308,6 +374,16 @@ header .actions { display: flex; gap: 10px; }
                 <input type="password" id="omadaClientSecret" placeholder="Client Secret (Open API)">
                 <button class="toggle-vis" onclick="toggleVis('omadaClientSecret')">👁</button>
               </div>
+              <details class="guide-accordion">
+                <summary>วิธีหาค่านี้ ? (Client ID + Client Secret)</summary>
+                <ol>
+                  <li>Login Omada Controller</li>
+                  <li>ไปที่ Settings → Platform Integration → Open API</li>
+                  <li>คลิก "Create" → ตั้งชื่อ "NetGuard-AI"</li>
+                  <li>เลือก Role: Administrator → เลือก Site</li>
+                  <li>คลิก "Save" → Copy Client ID และ Client Secret</li>
+                </ol>
+              </details>
             </div>
             <div class="field">
               <label>Site ID <span class="req">*</span></label>
@@ -315,6 +391,15 @@ header .actions { display: flex; gap: 10px; }
                 <input type="text" id="omadaSiteId" placeholder="default">
               </div>
               <div class="field-hint">Omada → Settings → Site → Site ID หรือใช้ "default"</div>
+              <details class="guide-accordion">
+                <summary>วิธีหาค่านี้ ?</summary>
+                <ol>
+                  <li>Login Omada Controller</li>
+                  <li>ไปที่ Settings → Open API</li>
+                  <li>ดู URL หลัง /sites/ จะเห็น Site ID</li>
+                  <li>หรือเรียก API: GET /openapi/v1/{omadacId}/sites</li>
+                </ol>
+              </details>
             </div>
             <div class="test-row">
               <button class="btn-test" onclick="testService('omada')">🔗 ทดสอบการเชื่อมต่อ</button>
@@ -343,6 +428,13 @@ header .actions { display: flex; gap: 10px; }
               <div class="input-wrap">
                 <input type="text" id="hikcentralUrl" placeholder="http://hikcentral.example.com">
               </div>
+              <details class="guide-accordion">
+                <summary>วิธีหาค่านี้ ?</summary>
+                <ol>
+                  <li>ใส่ URL ของ HikCentral เช่น https://192.168.1.10</li>
+                  <li>ปกติรันบน port 443</li>
+                </ol>
+              </details>
             </div>
             <div class="field">
               <label>App Key (AK) <span class="req">*</span></label>
@@ -357,6 +449,16 @@ header .actions { display: flex; gap: 10px; }
                 <button class="toggle-vis" onclick="toggleVis('hikcentralAppSecret')">👁</button>
               </div>
               <div class="field-hint">HikCentral → System → OpenAPI → สร้าง Partner (AK/SK) แล้ว Approve + ผูก user</div>
+              <details class="guide-accordion">
+                <summary>วิธีหาค่านี้ ? (AppKey + AppSecret)</summary>
+                <ol>
+                  <li>ติดตั้ง Artemis OpenAPI บน HikCentral Server ดาวน์โหลดจาก <a href="https://tpp.hikvision.com/tpp/Resource" target="_blank" rel="noopener">tpp.hikvision.com/tpp/Resource</a></li>
+                  <li>เปิด Artemis Web ที่ http://[server]:9017</li>
+                  <li>Login → User Management → สร้าง User</li>
+                  <li>Copy AppKey และ AppSecret</li>
+                  <li>ไปที่ Authorized API → เพิ่ม API ที่ต้องการ</li>
+                </ol>
+              </details>
             </div>
             <div class="test-row">
               <button class="btn-test" onclick="testService('hikcentral')">🔗 ทดสอบการเชื่อมต่อ</button>
@@ -382,6 +484,16 @@ header .actions { display: flex; gap: 10px; }
               <button class="toggle-vis" onclick="toggleVis('claudeApiKey')">👁</button>
             </div>
             <div class="field-hint">ดูได้ที่ <strong>console.anthropic.com</strong> → API Keys → Create Key</div>
+            <details class="guide-accordion">
+              <summary>วิธีหาค่านี้ ?</summary>
+              <ol>
+                <li>เปิด <a href="https://console.anthropic.com" target="_blank" rel="noopener">console.anthropic.com</a></li>
+                <li>Login → คลิก "API Keys" ในเมนูซ้าย</li>
+                <li>คลิก "Create Key" → ตั้งชื่อ "NetGuard-AI"</li>
+                <li>Copy Key ที่ได้ (แสดงครั้งเดียว!)</li>
+                <li>ตรวจสอบ quota ที่ <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener">console.anthropic.com/settings/billing</a></li>
+              </ol>
+            </details>
           </div>
           <div class="test-row">
             <button class="btn-test" onclick="testService('claude')">🔗 ทดสอบ Claude API</button>
