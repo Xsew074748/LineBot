@@ -33,11 +33,11 @@ cd /d "%INSTALL_DIR%"
 echo Installing to: %INSTALL_DIR%
 
 :: 3. ตรวจหา container NetGuard ที่รันอยู่
-docker ps --format "{{.Names}}" 2>nul | findstr /i "netguard line-bot it-monitor" >nul
+docker ps 2>nul | findstr /i "netguard line-bot it-monitor" >nul
 if not errorlevel 1 (
   echo.
   echo WARNING: Found existing NetGuard AI installation running
-  set /p ans=Update/restart it? (y/N):
+  set /p ans=Update/restart it? ^(y/N^):
   if /i "%ans%"=="y" (
     echo Stopping existing containers...
     docker compose down 2>nul
