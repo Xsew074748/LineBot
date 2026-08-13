@@ -1,0 +1,31 @@
+services:
+  line-bot:
+    image: phattadol358/netguard-ai:latest
+    restart: always
+    env_file: .env
+    ports:
+      - "3100:3000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      # Mount .env เข้า container ด้วย — จำเป็นสำหรับ middleware/setupAuth.js
+      # ซึ่งอ่าน/เขียนไฟล์ .env โดยตรงเพื่อดึง/บันทึก SETUP_PASSWORD_HASH
+      - ./.env:/app/.env:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: always
+    depends_on:
+      - line-bot
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+
+networks:
+  default:
+    name: netguard-net
