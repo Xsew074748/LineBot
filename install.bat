@@ -33,19 +33,28 @@ cd /d "%INSTALL_DIR%"
 echo Installing to: %INSTALL_DIR%
 
 :: 3. ตรวจหา container NetGuard ที่รันอยู่
+set EXISTING=0
 docker ps 2>nul | findstr /i "netguard line-bot it-monitor" >nul
-if not errorlevel 1 (
+if not errorlevel 1 set EXISTING=1
+
+if "%EXISTING%"=="1" (
   echo.
   echo WARNING: Found existing NetGuard AI installation running
-  set /p ans=Update/restart it? ^(y/N^):
-  if /i "%ans%"=="y" (
-    echo Stopping existing containers...
-    docker compose down 2>nul
-  ) else (
-    echo Cancelled. Existing installation unchanged.
-    exit /b 0
-  )
 )
+if "%EXISTING%"=="0" goto :no_existing
+
+:: ถาม outside ของ if block
+set /p ans=Update/restart it? ^(y/N^):
+if /i "%ans%"=="y" goto :do_update
+echo Cancelled. Existing installation unchanged.
+exit /b 0
+
+:do_update
+echo Stopping existing containers...
+docker compose down 2>nul
+goto :no_existing
+
+:no_existing
 
 :: 4. ตรวจ port 3100
 netstat -ano | findstr ":3100" | findstr "LISTENING" >nul
