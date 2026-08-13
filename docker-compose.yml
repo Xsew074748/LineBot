@@ -24,7 +24,7 @@ services:
       - ./logs:/app/logs
       # Mount .env เข้า container ด้วย — จำเป็นสำหรับ middleware/setupAuth.js
       # ซึ่งอ่านไฟล์ .env โดยตรงเพื่อดึง SETUP_PASSWORD_HASH
-      - ./.env:/app/.env:ro
+      - ./.env:/app/.env
       # CA cert สำหรับ Omada self-signed TLS (optional)
       # ถ้าใช้: uncomment แล้วตั้ง OMADA_CA_CERT_PATH=/certs/omada-ca.crt ใน .env
       # - ./certs:/certs:ro

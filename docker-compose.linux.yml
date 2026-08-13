@@ -10,7 +10,7 @@ services:
       - ./logs:/app/logs
       # Mount .env เข้า container ด้วย — จำเป็นสำหรับ middleware/setupAuth.js
       # ซึ่งอ่าน/เขียนไฟล์ .env โดยตรงเพื่อดึง/บันทึก SETUP_PASSWORD_HASH
-      - ./.env:/app/.env:ro
+      - ./.env:/app/.env
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
       interval: 30s
