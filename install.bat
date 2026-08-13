@@ -8,109 +8,106 @@ echo ======================================
 echo   NetGuard AI - Installer
 echo ======================================
 
-REM 1. ตรวจสอบ Docker
+REM 1. Check Docker
 where docker >nul 2>nul
 if errorlevel 1 (
-  echo Docker ไม่พบ — กรุณาติดตั้ง Docker Desktop ก่อน: https://www.docker.com/products/docker-desktop
+  echo Docker not found - please install Docker Desktop first: https://www.docker.com/products/docker-desktop
   pause
   exit /b 1
 )
 
 docker compose version >nul 2>nul
 if errorlevel 1 (
-  echo Docker Compose ไม่พบ — กรุณาอัปเดต Docker Desktop เป็นเวอร์ชันล่าสุด
+  echo Docker Compose not found - please update Docker Desktop to the latest version
   pause
   exit /b 1
 )
 
-echo Docker พร้อมใช้งาน
+echo Docker is ready
 
-REM 2. สร้างโฟลเดอร์ติดตั้ง
+REM 2. Create install folder
 set "INSTALL_DIR=%1"
 if "%INSTALL_DIR%"=="" set "INSTALL_DIR=%USERPROFILE%\netguard-ai"
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 cd /d "%INSTALL_DIR%"
-echo ติดตั้งที่: %INSTALL_DIR%
+echo Installing to: %INSTALL_DIR%
 
-REM 3. ดาวน์โหลด docker-compose.yml
-echo กำลังดาวน์โหลด docker-compose.yml...
+REM 3. Download docker-compose.yml
+echo Downloading docker-compose.yml...
 curl -fsSL "%COMPOSE_URL%" -o docker-compose.yml
 if errorlevel 1 (
-  echo ดาวน์โหลด docker-compose.yml ไม่สำเร็จ
+  echo Failed to download docker-compose.yml
   pause
   exit /b 1
 )
 
-REM 4. ถาม credentials
-echo.
-echo กรุณากรอกค่าต่อไปนี้ ^(กด Enter เพื่อข้ามถ้ายังไม่มี^)
-echo สามารถแก้ไขได้ภายหลังผ่านหน้า Setup UI
-echo --------------------------------------
-
-set /p LINE_SECRET="LINE Channel Secret: "
-set /p LINE_TOKEN="LINE Channel Access Token: "
-set /p ZABBIX_URL="Zabbix URL (เช่น http://192.168.1.10): "
-set /p ZABBIX_TOKEN="Zabbix API Token: "
-set /p OMADA_URL="Omada URL (เช่น https://192.168.1.10:8043): "
-set /p OMADA_CLIENT_ID="Omada Client ID: "
-set /p OMADA_CLIENT_SECRET="Omada Client Secret: "
-set /p OMADA_OMADAC_ID="Omada Omadac ID: "
-set /p OMADA_SITE_ID="Omada Site ID: "
-set /p HIK_URL="HikCentral URL (เช่น https://192.168.1.10): "
-set /p HIK_KEY="HikCentral AppKey: "
-set /p HIK_SECRET="HikCentral AppSecret: "
-set /p ANTHROPIC_KEY="Anthropic API Key: "
-set /p CF_TOKEN="Cloudflare Tunnel Token: "
-
-REM 5. สร้าง .env
-(
-  echo # LINE
-  echo LINE_CHANNEL_SECRET=%LINE_SECRET%
-  echo LINE_CHANNEL_ACCESS_TOKEN=%LINE_TOKEN%
-  echo.
-  echo # Zabbix
-  echo ZABBIX_URL=%ZABBIX_URL%
-  echo ZABBIX_API_TOKEN=%ZABBIX_TOKEN%
-  echo.
-  echo # Omada
-  echo OMADA_URL=%OMADA_URL%
-  echo OMADA_CLIENT_ID=%OMADA_CLIENT_ID%
-  echo OMADA_CLIENT_SECRET=%OMADA_CLIENT_SECRET%
-  echo OMADA_OMADAC_ID=%OMADA_OMADAC_ID%
-  echo OMADA_SITE_ID=%OMADA_SITE_ID%
-  echo.
-  echo # HikCentral
-  echo HIKCENTRAL_URL=%HIK_URL%
-  echo HIKCENTRAL_APP_KEY=%HIK_KEY%
-  echo HIKCENTRAL_APP_SECRET=%HIK_SECRET%
-  echo.
-  echo # Claude AI
-  echo ANTHROPIC_API_KEY=%ANTHROPIC_KEY%
-  echo.
-  echo # Cloudflare
-  echo CLOUDFLARE_TUNNEL_TOKEN=%CF_TOKEN%
-) > .env
-
-echo สร้าง .env สำเร็จ
-
-REM 6. รัน Docker
-echo.
-echo กำลังเริ่มต้นระบบ...
-docker compose up -d
+REM 4. Create .env template (empty values)
+if exist .env (
+  echo Found existing .env - skipping template creation ^(not overwritten^)
+) else (
+  (
+    echo # ---- LINE ----------------------------------------
+    echo LINE_CHANNEL_SECRET=
+    echo LINE_CHANNEL_ACCESS_TOKEN=
+    echo.
+    echo # ---- Zabbix ---------------------------------------
+    echo ZABBIX_URL=
+    echo ZABBIX_API_TOKEN=
+    echo.
+    echo # ---- Omada ^(Open API^) ------------------------------
+    echo OMADA_URL=
+    echo OMADA_CLIENT_ID=
+    echo OMADA_CLIENT_SECRET=
+    echo OMADA_OMADAC_ID=
+    echo OMADA_SITE_ID=
+    echo.
+    echo # ---- HikCentral ^(AK/SK^) -----------------------------
+    echo HIKCENTRAL_URL=
+    echo HIKCENTRAL_APP_KEY=
+    echo HIKCENTRAL_APP_SECRET=
+    echo.
+    echo # ---- Claude AI --------------------------------------
+    echo ANTHROPIC_API_KEY=
+    echo.
+    echo # ---- Cloudflare Tunnel -------------------------------
+    echo CLOUDFLARE_TUNNEL_TOKEN=
+  ) > .env
+  echo .env template created
+)
 
 echo.
-echo ======================================
-echo   ติดตั้งสำเร็จ!
-echo ======================================
+echo Fill in .env first, then run docker compose up -d
+echo Or fill via Setup UI at http://localhost:3100/setup
 echo.
-echo เปิด Setup UI ที่: http://localhost:3100/setup
-echo.
-echo คำสั่งที่ใช้บ่อย:
-echo   docker compose ps          - ดูสถานะ
-echo   docker compose logs -f     - ดู log
-echo   docker compose down        - หยุดระบบ
-echo   docker compose pull ^&^& docker compose up -d  - อัปเดต
 
-start http://localhost:3100/setup
+REM 5. Ask whether to run now
+set /p "RUN_NOW=Run docker compose up -d now? (y/N): "
+
+if /i "%RUN_NOW%"=="y" (
+  echo.
+  echo Starting services...
+  docker compose up -d
+
+  echo.
+  echo ======================================
+  echo   Install complete!
+  echo ======================================
+  echo.
+  echo Open Setup UI at: http://localhost:3100/setup
+  echo.
+  echo Common commands:
+  echo   docker compose ps          - show status
+  echo   docker compose logs -f     - view logs
+  echo   docker compose down        - stop services
+  echo   docker compose pull ^&^& docker compose up -d  - update
+
+  start http://localhost:3100/setup
+) else (
+  echo.
+  echo Services not started yet. Fill in %INSTALL_DIR%\.env first, then run:
+  echo.
+  echo   cd /d "%INSTALL_DIR%"
+  echo   docker compose up -d
+)
 
 pause

@@ -33,74 +33,71 @@ echo "📁 ติดตั้งที่: $INSTALL_DIR"
 echo "📥 ดาวน์โหลด docker-compose.yml..."
 curl -fsSL "$COMPOSE_URL" -o docker-compose.yml
 
-# 4. ถาม credentials
-echo ""
-echo "กรุณากรอกค่าต่อไปนี้ (กด Enter เพื่อข้ามถ้ายังไม่มี)"
-echo "สามารถแก้ไขได้ภายหลังผ่านหน้า Setup UI"
-echo "--------------------------------------"
+# 4. สร้าง .env template (ค่าว่าง)
+if [ -f .env ]; then
+  echo "⚠️  พบ .env อยู่แล้ว — ข้ามการสร้างใหม่ (ไม่เขียนทับ)"
+else
+  cat > .env << 'ENVEOF'
+# ── LINE ──────────────────────────────────────
+LINE_CHANNEL_SECRET=
+LINE_CHANNEL_ACCESS_TOKEN=
 
-read -p "LINE Channel Secret: " LINE_SECRET
-read -p "LINE Channel Access Token: " LINE_TOKEN
-read -p "Zabbix URL (เช่น http://192.168.1.10): " ZABBIX_URL
-read -p "Zabbix API Token: " ZABBIX_TOKEN
-read -p "Omada URL (เช่น https://192.168.1.10:8043): " OMADA_URL
-read -p "Omada Client ID: " OMADA_CLIENT_ID
-read -s -p "Omada Client Secret: " OMADA_CLIENT_SECRET; echo
-read -p "Omada Omadac ID: " OMADA_OMADAC_ID
-read -p "Omada Site ID: " OMADA_SITE_ID
-read -p "HikCentral URL (เช่น https://192.168.1.10): " HIK_URL
-read -p "HikCentral AppKey: " HIK_KEY
-read -s -p "HikCentral AppSecret: " HIK_SECRET; echo
-read -s -p "Anthropic API Key: " ANTHROPIC_KEY; echo
-read -s -p "Cloudflare Tunnel Token: " CF_TOKEN; echo
+# ── Zabbix ────────────────────────────────────
+ZABBIX_URL=
+ZABBIX_API_TOKEN=
 
-# 5. สร้าง .env
-cat > .env << ENVEOF
-# LINE
-LINE_CHANNEL_SECRET=${LINE_SECRET}
-LINE_CHANNEL_ACCESS_TOKEN=${LINE_TOKEN}
+# ── Omada (Open API) ──────────────────────────
+OMADA_URL=
+OMADA_CLIENT_ID=
+OMADA_CLIENT_SECRET=
+OMADA_OMADAC_ID=
+OMADA_SITE_ID=
 
-# Zabbix
-ZABBIX_URL=${ZABBIX_URL}
-ZABBIX_API_TOKEN=${ZABBIX_TOKEN}
+# ── HikCentral (AK/SK) ────────────────────────
+HIKCENTRAL_URL=
+HIKCENTRAL_APP_KEY=
+HIKCENTRAL_APP_SECRET=
 
-# Omada
-OMADA_URL=${OMADA_URL}
-OMADA_CLIENT_ID=${OMADA_CLIENT_ID}
-OMADA_CLIENT_SECRET=${OMADA_CLIENT_SECRET}
-OMADA_OMADAC_ID=${OMADA_OMADAC_ID}
-OMADA_SITE_ID=${OMADA_SITE_ID}
+# ── Claude AI ─────────────────────────────────
+ANTHROPIC_API_KEY=
 
-# HikCentral
-HIKCENTRAL_URL=${HIK_URL}
-HIKCENTRAL_APP_KEY=${HIK_KEY}
-HIKCENTRAL_APP_SECRET=${HIK_SECRET}
-
-# Claude AI
-ANTHROPIC_API_KEY=${ANTHROPIC_KEY}
-
-# Cloudflare
-CLOUDFLARE_TUNNEL_TOKEN=${CF_TOKEN}
+# ── Cloudflare Tunnel ─────────────────────────
+CLOUDFLARE_TUNNEL_TOKEN=
 ENVEOF
-
-chmod 600 .env
-echo "✅ สร้าง .env สำเร็จ"
-
-# 6. รัน Docker
-echo ""
-echo "🚀 เริ่มต้นระบบ..."
-docker compose up -d
+  chmod 600 .env
+  echo "✅ สร้าง .env template สำเร็จ"
+fi
 
 echo ""
-echo "======================================"
-echo "  ✅ ติดตั้งสำเร็จ!"
-echo "======================================"
+echo "📝 กรอกค่าใน .env ก่อน แล้วค่อยรัน docker compose up -d"
+echo "   หรือกรอกผ่านหน้า Setup UI ที่ http://localhost:3100/setup"
 echo ""
-echo "เปิด Setup UI ที่: http://localhost:3100/setup"
-echo "หรือผ่าน Cloudflare Tunnel ที่คุณตั้งไว้"
-echo ""
-echo "คำสั่งที่ใช้บ่อย:"
-echo "  docker compose ps          — ดูสถานะ"
-echo "  docker compose logs -f     — ดู log"
-echo "  docker compose down        — หยุดระบบ"
-echo "  docker compose pull && docker compose up -d  — อัปเดต"
+
+# 5. ถามว่าจะรันเลยไหม
+read -p "รัน docker compose up -d เลยไหม? (y/N): " RUN_NOW
+
+if [[ "$RUN_NOW" =~ ^[Yy]$ ]]; then
+  echo ""
+  echo "🚀 เริ่มต้นระบบ..."
+  docker compose up -d
+
+  echo ""
+  echo "======================================"
+  echo "  ✅ ติดตั้งสำเร็จ!"
+  echo "======================================"
+  echo ""
+  echo "เปิด Setup UI ที่: http://localhost:3100/setup"
+  echo "หรือผ่าน Cloudflare Tunnel ที่คุณตั้งไว้"
+  echo ""
+  echo "คำสั่งที่ใช้บ่อย:"
+  echo "  docker compose ps          — ดูสถานะ"
+  echo "  docker compose logs -f     — ดู log"
+  echo "  docker compose down        — หยุดระบบ"
+  echo "  docker compose pull && docker compose up -d  — อัปเดต"
+else
+  echo ""
+  echo "ยังไม่ได้เริ่มระบบ — กรอกค่าใน $INSTALL_DIR/.env ให้ครบก่อน แล้วรัน:"
+  echo ""
+  echo "  cd $INSTALL_DIR"
+  echo "  docker compose up -d"
+fi
