@@ -29,25 +29,32 @@ mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 echo "📁 ติดตั้งที่: $INSTALL_DIR"
 
-# 3. Download docker-compose.yml
+# 3. ตรวจหา container NetGuard ที่รันอยู่
+if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "netguard\|line-bot\|it-monitor"; then
+  echo ""
+  echo "⚠️  Found existing NetGuard AI installation running"
+  read -p "Update/restart it? (y/N): " ans
+  if [[ "$ans" == "y" || "$ans" == "Y" ]]; then
+    echo "Stopping existing containers..."
+    docker compose down 2>/dev/null || true
+  else
+    echo "Cancelled. Existing installation unchanged."
+    exit 0
+  fi
+fi
+
+# 4. ตรวจ port 3100 (กัน case อื่นที่ไม่ใช่ netguard ใช้ port นี้อยู่)
+if lsof -Pi :3100 -sTCP:LISTEN -t >/dev/null 2>&1; then
+  echo "❌ Port 3100 is still in use by another process"
+  echo "   Please free port 3100 first then run again"
+  exit 1
+fi
+
+# 5. Download docker-compose.yml
 echo "📥 ดาวน์โหลด docker-compose.yml..."
 curl -fsSL "$COMPOSE_URL" -o docker-compose.yml
 
-# 3b. หา port ว่างเริ่มจาก 3100
-PORT=3100
-while lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null 2>&1; do
-  echo "Port $PORT is in use, trying $((PORT+1))..."
-  PORT=$((PORT+1))
-done
-echo "Using port: $PORT"
-
-# เขียน port ที่ได้ลง docker-compose.yml
-sed -i "s/3100:3000/$PORT:3000/g" docker-compose.yml
-
-# บันทึก port ไว้ใช้อ้างอิงครั้งต่อไป
-echo "$PORT" > port.txt
-
-# 4. สร้าง .env template (ค่าว่าง)
+# 6. สร้าง .env template (ค่าว่าง)
 if [ -f .env ]; then
   echo "⚠️  พบ .env อยู่แล้ว — ข้ามการสร้างใหม่ (ไม่เขียนทับ)"
 else
@@ -84,10 +91,10 @@ fi
 
 echo ""
 echo "📝 กรอกค่าใน .env ก่อน แล้วค่อยรัน docker compose up -d"
-echo "   หรือกรอกผ่านหน้า Setup UI ที่ http://localhost:$PORT/setup"
+echo "   หรือกรอกผ่านหน้า Setup UI ที่ http://localhost:3100/setup"
 echo ""
 
-# 5. ถามว่าจะรันเลยไหม
+# 7. ถามว่าจะรันเลยไหม
 read -p "รัน docker compose up -d เลยไหม? (y/N): " RUN_NOW
 
 if [[ "$RUN_NOW" =~ ^[Yy]$ ]]; then
@@ -100,7 +107,7 @@ if [[ "$RUN_NOW" =~ ^[Yy]$ ]]; then
   echo "  ✅ ติดตั้งสำเร็จ!"
   echo "======================================"
   echo ""
-  echo "เปิด Setup UI ที่: http://localhost:$PORT/setup"
+  echo "เปิด Setup UI ที่: http://localhost:3100/setup"
   echo "หรือผ่าน Cloudflare Tunnel ที่คุณตั้งไว้"
   echo ""
   echo "คำสั่งที่ใช้บ่อย:"
