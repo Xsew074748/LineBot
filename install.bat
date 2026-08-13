@@ -41,6 +41,23 @@ if errorlevel 1 (
   exit /b 1
 )
 
+REM 3b. Find a free port starting from 3100
+set PORT=3100
+:check_port
+netstat -ano | findstr ":%PORT%" | findstr "LISTENING" > nul
+if not errorlevel 1 (
+  echo Port %PORT% is in use, trying next...
+  set /a PORT=%PORT%+1
+  goto check_port
+)
+echo Using port: %PORT%
+
+:: Write the chosen port into docker-compose.yml
+powershell -Command "(Get-Content docker-compose.yml) -replace '3100:3000','%PORT%:3000' | Set-Content docker-compose.yml"
+
+:: Save the port for future reference
+echo %PORT% > port.txt
+
 REM 4. Create .env template (empty values)
 if exist .env (
   echo Found existing .env - skipping template creation ^(not overwritten^)
@@ -77,7 +94,7 @@ if exist .env (
 
 echo.
 echo Fill in .env first, then run docker compose up -d
-echo Or fill via Setup UI at http://localhost:3100/setup
+echo Or fill via Setup UI at http://localhost:%PORT%/setup
 echo.
 
 REM 5. Ask whether to run now
@@ -93,7 +110,7 @@ if /i "%RUN_NOW%"=="y" (
   echo   Install complete!
   echo ======================================
   echo.
-  echo Open Setup UI at: http://localhost:3100/setup
+  echo Open Setup UI at: http://localhost:%PORT%/setup
   echo.
   echo Common commands:
   echo   docker compose ps          - show status
@@ -101,7 +118,7 @@ if /i "%RUN_NOW%"=="y" (
   echo   docker compose down        - stop services
   echo   docker compose pull ^&^& docker compose up -d  - update
 
-  start http://localhost:3100/setup
+  start http://localhost:%PORT%/setup
 ) else (
   echo.
   echo Services not started yet. Fill in %INSTALL_DIR%\.env first, then run:
