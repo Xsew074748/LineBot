@@ -320,7 +320,7 @@ header h1 { font-size: 17px; font-weight: 700; display: flex; align-items: cente
 
 <!-- Save bar -->
 <div class="save-bar">
-  <span class="save-hint" id="saveHint">⚠️ ต้อง Restart Bot หลังบันทึก เพื่อให้ค่าใหม่มีผล</span>
+  <span class="save-hint" id="saveHint">🔄 บันทึกแล้ว bot จะ restart ให้อัตโนมัติ</span>
   <button class="btn-save" id="saveBtn" onclick="saveAll()">💾 บันทึกการตั้งค่า</button>
 </div>
 
@@ -464,7 +464,7 @@ async function saveAll() {
       body: JSON.stringify(payload),
     });
     const d = await r.json();
-    showAlert('topAlert', d.ok ? 'ok' : 'err', d.message || d.error);
+    showAlert('topAlert', d.ok ? 'ok' : 'err', d.ok ? '✅ บันทึกสำเร็จ — กำลัง restart bot อัตโนมัติ รอสักครู่แล้วรีเฟรชหน้านี้ใหม่' : (d.message || d.error));
     if (d.ok) {
       editedFields.clear();
       document.getElementById('setupPassword').value = '';

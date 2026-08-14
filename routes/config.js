@@ -4,6 +4,7 @@ const fs         = require('fs');
 const path       = require('path');
 const axios      = require('axios');
 const auth       = require('../middleware/setupAuth');
+const logger     = require('../services/logger');
 // testConnection: ฟังก์ชัน test ของ Omada — Open API client credentials flow
 // เดียวกับ service จริง (POST /openapi/authorize/token) + httpsAgent เดียวกัน
 const { testConnection: omadaTestConn } = require('../services/omada');
@@ -163,7 +164,17 @@ router.post('/save', (req, res) => {
     writeEnv(updates);
     if (b.omadaEnabled !== undefined)      updateConfigEnabled('omada',      b.omadaEnabled);
     if (b.hikcentralEnabled !== undefined) updateConfigEnabled('hikcentral', b.hikcentralEnabled);
-    res.json({ ok: true, message: 'บันทึกเรียบร้อย — กรุณา Restart Bot เพื่อให้ค่าใหม่มีผล' });
+    res.json({ ok: true, message: 'บันทึกสำเร็จ — กำลัง restart bot อัตโนมัติ...' });
+
+    // ออกจาก process หลังส่ง response แล้ว — docker-compose ตั้ง restart:always ไว้
+    // จึงจะ start container ใหม่ให้เอง และโหลด .env ที่เพิ่งบันทึกเข้ามาแทน
+    // (ข้ามตอนรัน test เพราะไม่ได้รันภายใต้ docker restart policy)
+    if (process.env.NODE_ENV !== 'test') {
+      res.on('finish', () => {
+        logger.info('Config saved — restarting process for new .env to take effect');
+        setTimeout(() => process.exit(0), 200);
+      });
+    }
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }

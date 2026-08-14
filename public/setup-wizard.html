@@ -530,8 +530,7 @@ details.guide-accordion a:hover { color: var(--teal-d); }
 
         <div id="saveResult" class="save-result"></div>
         <div class="restart-note" id="restartNote" style="display:none">
-          ⚠️ <strong>บันทึกสำเร็จ!</strong> กรุณา Restart Bot เพื่อให้การตั้งค่าใหม่มีผล<br>
-          <code style="font-size:12px; background:#fff8; padding:2px 6px; border-radius:4px; margin-top:4px; display:inline-block;">pm2 restart bot</code> หรือปิด-เปิด process ใหม่
+          🔄 บอทกำลัง restart อัตโนมัติเพื่อให้การตั้งค่าใหม่มีผล — รอสักครู่แล้วรีเฟรชหน้านี้ใหม่
         </div>
 
         <div class="nav-row">
@@ -702,7 +701,7 @@ async function saveAll() {
     const d = await r.json();
     const el = document.getElementById('saveResult');
     el.className = 'save-result ' + (d.ok ? 'ok' : 'err');
-    el.textContent = d.message || d.error;
+    el.textContent = d.ok ? '✅ บันทึกสำเร็จ — กำลัง restart bot อัตโนมัติ' : (d.message || d.error);
     if (d.ok) document.getElementById('restartNote').style.display = 'block';
   } catch(e) {
     const el = document.getElementById('saveResult');
