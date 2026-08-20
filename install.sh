@@ -23,14 +23,22 @@ fi
 
 echo "✅ Docker พร้อมใช้งาน"
 
-# 2. สร้างโฟลเดอร์
-INSTALL_DIR="${1:-$HOME/netguard-ai}"
+# 2. ถาม port
+read -p "Enter port number (default: 3100): " PORT
+PORT=${PORT:-3100}
+
+# ถามชื่อ project
+read -p "Enter project name (default: netguard): " PROJECT
+PROJECT=${PROJECT:-netguard}
+
+# 3. สร้างโฟลเดอร์
+INSTALL_DIR="${1:-$HOME/$PROJECT}"
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 echo "📁 ติดตั้งที่: $INSTALL_DIR"
 
-# 3. ตรวจหา container NetGuard ที่รันอยู่
-if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "netguard\|line-bot\|it-monitor"; then
+# 4. ตรวจหา container ที่รันอยู่ (ตาม project name)
+if docker ps --format '{{.Names}}' 2>/dev/null | grep -qi "$PROJECT\|netguard\|line-bot\|it-monitor"; then
   echo ""
   echo "⚠️  Found existing NetGuard AI installation running"
   read -p "Update/restart it? (y/N): " ans
@@ -43,18 +51,22 @@ if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "netguard\|line-bot\|it
   fi
 fi
 
-# 4. ตรวจ port 3100 (กัน case อื่นที่ไม่ใช่ netguard ใช้ port นี้อยู่)
-if lsof -Pi :3100 -sTCP:LISTEN -t >/dev/null 2>&1; then
-  echo "❌ Port 3100 is still in use by another process"
-  echo "   Please free port 3100 first then run again"
+# 5. ตรวจ port ที่เลือก
+if lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null 2>&1; then
+  echo "❌ Port $PORT is already in use"
+  echo "   Please choose a different port"
   exit 1
 fi
 
-# 5. Download docker-compose.yml
+# 6. Download docker-compose.yml
 echo "📥 ดาวน์โหลด docker-compose.yml..."
 curl -fsSL "$COMPOSE_URL" -o docker-compose.yml
 
-# 6. สร้าง .env template (ค่าว่าง)
+# แก้ port และชื่อ network ใน docker-compose.yml
+sed -i "s/3100:3000/$PORT:3000/g" docker-compose.yml
+sed -i "s/netguard-net/$PROJECT-net/g" docker-compose.yml
+
+# 7. สร้าง .env template (ค่าว่าง)
 if [ -f .env ]; then
   echo "⚠️  พบ .env อยู่แล้ว — ข้ามการสร้างใหม่ (ไม่เขียนทับ)"
 else
@@ -91,10 +103,10 @@ fi
 
 echo ""
 echo "📝 กรอกค่าใน .env ก่อน แล้วค่อยรัน docker compose up -d"
-echo "   หรือกรอกผ่านหน้า Setup UI ที่ http://localhost:3100/setup"
+echo "   หรือกรอกผ่านหน้า Setup UI ที่ http://localhost:$PORT/setup"
 echo ""
 
-# 7. ถามว่าจะรันเลยไหม
+# 8. ถามว่าจะรันเลยไหม
 read -p "รัน docker compose up -d เลยไหม? (y/N): " RUN_NOW
 
 if [[ "$RUN_NOW" =~ ^[Yy]$ ]]; then
@@ -107,7 +119,7 @@ if [[ "$RUN_NOW" =~ ^[Yy]$ ]]; then
   echo "  ✅ ติดตั้งสำเร็จ!"
   echo "======================================"
   echo ""
-  echo "เปิด Setup UI ที่: http://localhost:3100/setup"
+  echo "เปิด Setup UI ที่: http://localhost:$PORT/setup"
   echo "หรือผ่าน Cloudflare Tunnel ที่คุณตั้งไว้"
   echo ""
   echo "คำสั่งที่ใช้บ่อย:"

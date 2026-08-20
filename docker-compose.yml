@@ -11,7 +11,7 @@ services:
 
     # ภายนอก 3100 → ภายใน container 3000 (PORT ใน .env)
     ports:
-      - "3100:3000"
+      - ":3000"
 
     # โหลด .env จากไฟล์ (ไม่ hardcode ค่าใน compose)
     env_file:

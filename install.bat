@@ -25,16 +25,26 @@ if errorlevel 1 (
 
 echo Docker is ready
 
-REM 2. Create install folder
+:: 2. ถาม port
+set PORT=3100
+set /p PORT=Enter port number (default: 3100):
+if "%PORT%"=="" set PORT=3100
+
+:: ถามชื่อ customer/project
+set PROJECT=netguard
+set /p PROJECT=Enter project name (default: netguard):
+if "%PROJECT%"=="" set PROJECT=netguard
+
+REM 3. Create install folder
 set "INSTALL_DIR=%1"
-if "%INSTALL_DIR%"=="" set "INSTALL_DIR=%USERPROFILE%\netguard-ai"
+if "%INSTALL_DIR%"=="" set "INSTALL_DIR=%USERPROFILE%\%PROJECT%"
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 cd /d "%INSTALL_DIR%"
 echo Installing to: %INSTALL_DIR%
 
-:: 3. ตรวจหา container NetGuard ที่รันอยู่
+:: 4. ตรวจหา container ที่รันอยู่ (ตาม project name)
 set EXISTING=0
-docker ps 2>nul | findstr /i "netguard line-bot it-monitor" >nul
+docker ps 2>nul | findstr /i "%PROJECT% netguard line-bot it-monitor" >nul
 if not errorlevel 1 set EXISTING=1
 
 if "%EXISTING%"=="1" (
@@ -56,16 +66,16 @@ goto :no_existing
 
 :no_existing
 
-:: 4. ตรวจ port 3100
-netstat -ano | findstr ":3100" | findstr "LISTENING" >nul
+:: 5. ตรวจ port ที่เลือกว่าว่างไหม
+netstat -ano | findstr ":%PORT%" | findstr "LISTENING" >nul
 if not errorlevel 1 (
-  echo ERROR: Port 3100 is still in use by another process
-  echo Please free port 3100 first then run again
+  echo ERROR: Port %PORT% is already in use
+  echo Please choose a different port
   pause
   exit /b 1
 )
 
-REM 5. Download docker-compose.yml
+REM 6. Download docker-compose.yml
 echo Downloading docker-compose.yml...
 curl -fsSL "%COMPOSE_URL%" -o docker-compose.yml
 if errorlevel 1 (
@@ -74,7 +84,11 @@ if errorlevel 1 (
   exit /b 1
 )
 
-REM 6. Create .env template (empty values)
+:: แก้ port และชื่อ network ใน docker-compose.yml
+powershell -Command "(Get-Content docker-compose.yml) -replace '3100:3000','%PORT%:3000' | Set-Content docker-compose.yml"
+powershell -Command "(Get-Content docker-compose.yml) -replace 'netguard-net','%PROJECT%-net' | Set-Content docker-compose.yml"
+
+REM 7. Create .env template (empty values)
 if exist .env (
   echo Found existing .env - skipping template creation ^(not overwritten^)
 ) else (
@@ -110,10 +124,10 @@ if exist .env (
 
 echo.
 echo Fill in .env first, then run docker compose up -d
-echo Or fill via Setup UI at http://localhost:3100/setup
+echo Or fill via Setup UI at http://localhost:%PORT%/setup
 echo.
 
-REM 7. Ask whether to run now
+REM 8. Ask whether to run now
 set /p "RUN_NOW=Run docker compose up -d now? (y/N): "
 
 if /i "%RUN_NOW%"=="y" (
@@ -126,7 +140,7 @@ if /i "%RUN_NOW%"=="y" (
   echo   Install complete!
   echo ======================================
   echo.
-  echo Open Setup UI at: http://localhost:3100/setup
+  echo Open Setup UI at: http://localhost:%PORT%/setup
   echo.
   echo Common commands:
   echo   docker compose ps          - show status
@@ -134,7 +148,7 @@ if /i "%RUN_NOW%"=="y" (
   echo   docker compose down        - stop services
   echo   docker compose pull ^&^& docker compose up -d  - update
 
-  start http://localhost:3100/setup
+  start http://localhost:%PORT%/setup
 ) else (
   echo.
   echo Services not started yet. Fill in %INSTALL_DIR%\.env first, then run:
