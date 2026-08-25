@@ -77,7 +77,9 @@ const OFFLINE_CAM_POLL_MS = 90_000; // 90 วินาที
 const offlineCamCache = { raw: null, refreshedAt: 0 };
 
 // /stats cache — กัน Manager poll ถี่ (ทุก 5 นาที) ยิง API upstream ซ้ำเกินจำเป็น
-const STATS_CACHE_TTL_MS = 60 * 1000;
+// TTL สั้นลงเหลือ 10s เมื่อผลลัพธ์ partial (มี monitor fail/timeout) — กันแช่ค่าผิดไว้นาน
+const STATS_CACHE_TTL_MS         = 60 * 1000;
+const STATS_PARTIAL_CACHE_TTL_MS = 10 * 1000;
 const statsCache = { data: null, expireAt: 0 };
 
 // Per-user context สำหรับ on-demand AI analysis (TTL 10 นาที)
@@ -150,7 +152,9 @@ app.get('/health', (req, res) => {
 });
 
 // ── /stats endpoint (NetGuard Manager poll ทุก 5 นาที เก็บสถิติ) ─────────────
-// cache 60 วินาที กัน manager poll ถี่ยิง API upstream ซ้ำ — เหมือน /health ไม่ต้อง auth
+// cache 60 วินาทีเมื่อข้อมูลครบทุก monitor — เหมือน /health ไม่ต้อง auth
+// ถ้ามี monitor ไหน timeout/fail (partial: true) → cache แค่ 10 วินาที กันแช่ค่าผิดไว้นาน
+// แต่ยังกันชนไม่ให้ manager poll ถี่ยิง API upstream ซ้ำระหว่างที่ upstream กำลังมีปัญหา
 app.get('/stats', async (req, res) => {
   if (statsCache.data && Date.now() < statsCache.expireAt) {
     return res.json(statsCache.data);
@@ -159,10 +163,10 @@ app.get('/stats', async (req, res) => {
     monitorKeys: Object.keys(enabledMonitors),
     zabbix,
     omada,
-    getCameras: (zabbix || hikcentral) ? getCamerasWithCache : null,
+    hikcentral,
   });
   statsCache.data     = stats;
-  statsCache.expireAt = Date.now() + STATS_CACHE_TTL_MS;
+  statsCache.expireAt = Date.now() + (stats.partial ? STATS_PARTIAL_CACHE_TTL_MS : STATS_CACHE_TTL_MS);
   res.json(stats);
 });
 

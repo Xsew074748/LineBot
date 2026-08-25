@@ -224,6 +224,34 @@ describe('zabbix.getHostMetrics()', () => {
   });
 });
 
+describe('zabbix.getHosts() — available มาจาก interfaces[0] (host-level available ถูก Zabbix เลิกคืนแล้ว)', () => {
+  beforeEach(() => { resetHttpMocks(); });
+
+  it('host มี interfaces[0].available = 1 → นับเป็น up (available=1)', async () => {
+    axios.post.mockResolvedValue({ data: { result: [
+      { hostid: '1', host: 'srv01', name: 'srv01', status: '0', interfaces: [{ ip: '10.0.0.1', available: '1' }] },
+    ] } });
+    const hosts = await zabbix.getHosts();
+    expect(hosts[0].available).toBe(1);
+  });
+
+  it('host มี interfaces[0].available = 2 → นับเป็น down (available=2)', async () => {
+    axios.post.mockResolvedValue({ data: { result: [
+      { hostid: '2', host: 'srv02', name: 'srv02', status: '0', interfaces: [{ ip: '10.0.0.2', available: '2' }] },
+    ] } });
+    const hosts = await zabbix.getHosts();
+    expect(hosts[0].available).toBe(2);
+  });
+
+  it('host ไม่มี interfaces เลย → fallback ใช้ status (monitored=0 → available=1)', async () => {
+    axios.post.mockResolvedValue({ data: { result: [
+      { hostid: '3', host: 'srv03', name: 'srv03', status: '0', interfaces: [] },
+    ] } });
+    const hosts = await zabbix.getHosts();
+    expect(hosts[0].available).toBe(1);
+  });
+});
+
 describe('hikcentral.getRegions() + region cache', () => {
   beforeEach(() => { resetHttpMocks(); });
 

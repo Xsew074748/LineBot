@@ -30,16 +30,31 @@ function processProblemCounts(problems) {
 
 // deps:
 //   monitorKeys — array ชื่อ monitor ที่ enabled เช่น ['zabbix','omada','hikcentral']
-//   zabbix, omada — service module หรือ null ถ้าไม่ได้เปิดใช้งาน
-//   getCameras — async function คืน array กล้อง (รวมจากทุก monitor) หรือ null ถ้าไม่มีกล้องเลย
+//   zabbix, omada, hikcentral — service module หรือ null ถ้าไม่ได้เปิดใช้งาน
 //   timeoutMs — จำกัดเวลาต่อ monitor call กัน manager รอนาน
-async function buildStats({ monitorKeys = [], zabbix = null, omada = null, getCameras = null, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
-  const [problemsR, hostsR, apsR, camsR] = await Promise.allSettled([
-    zabbix     ? withTimeout(zabbix.getProblems(200), timeoutMs) : Promise.resolve(null),
-    zabbix     ? withTimeout(zabbix.getHosts(200), timeoutMs)    : Promise.resolve(null),
-    omada      ? withTimeout(omada.getAPs(), timeoutMs)          : Promise.resolve(null),
-    getCameras ? withTimeout(getCameras(), timeoutMs)            : Promise.resolve(null),
-  ]);
+//
+// ติดตามความสำเร็จ/ล้มเหลวแยกราย "monitor" (ไม่ใช่รายชนิดข้อมูล) — zabbix มีทั้ง
+// problems/hosts/cameras ถ้าตัวใดตัวหนึ่ง timeout/fail ถือว่า zabbix เป็น partial
+async function buildStats({ monitorKeys = [], zabbix = null, omada = null, hikcentral = null, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+  const jobs = {};
+  if (zabbix)     jobs.problems    = withTimeout(zabbix.getProblems(200), timeoutMs);
+  if (zabbix)     jobs.hosts       = withTimeout(zabbix.getHosts(200), timeoutMs);
+  if (zabbix)     jobs.zCameras    = withTimeout(zabbix.getCameras(), timeoutMs);
+  if (omada)      jobs.aps         = withTimeout(omada.getAPs(), timeoutMs);
+  if (hikcentral) jobs.hikCameras  = withTimeout(hikcentral.getCameras(1, 1000), timeoutMs);
+
+  const keys    = Object.keys(jobs);
+  const settled = await Promise.allSettled(keys.map((k) => jobs[k]));
+  const results = {};
+  keys.forEach((k, i) => { results[k] = settled[i]; });
+
+  const ok  = (key) => results[key] && results[key].status === 'fulfilled';
+  const val = (key, fallback) => (ok(key) ? results[key].value : fallback);
+
+  const failed = new Set();
+  if (zabbix     && !(ok('problems') && ok('hosts') && ok('zCameras'))) failed.add('zabbix');
+  if (omada      && !ok('aps'))                                        failed.add('omada');
+  if (hikcentral && !ok('hikCameras'))                                 failed.add('hikcentral');
 
   const stats = {
     ok: true,
@@ -48,26 +63,28 @@ async function buildStats({ monitorKeys = [], zabbix = null, omada = null, getCa
   };
 
   if (zabbix) {
-    const problems = problemsR.status === 'fulfilled' && problemsR.value ? problemsR.value : [];
-    stats.problems = processProblemCounts(problems);
+    stats.problems = processProblemCounts(val('problems', []));
 
-    const hosts = hostsR.status === 'fulfilled' && hostsR.value ? hostsR.value : [];
     stats.devices = stats.devices || {};
-    stats.devices.hosts = countUpDown(hosts, (h) => h.available === 1);
+    stats.devices.hosts = countUpDown(val('hosts', []), (h) => h.available === 1);
   }
 
   if (omada) {
-    const aps      = (apsR.status === 'fulfilled' && apsR.value?.aps)      || [];
-    const switches = (apsR.status === 'fulfilled' && apsR.value?.switches) || [];
+    const apsData = val('aps', {});
     stats.devices = stats.devices || {};
-    stats.devices.aps      = countUpDown(aps,      (d) => d.status === 'up');
-    stats.devices.switches = countUpDown(switches, (d) => d.status === 'up');
+    stats.devices.aps      = countUpDown(apsData.aps || [],      (d) => d.status === 'up');
+    stats.devices.switches = countUpDown(apsData.switches || [], (d) => d.status === 'up');
   }
 
-  if (getCameras) {
-    const cams = (camsR.status === 'fulfilled' && camsR.value) || [];
+  if (zabbix || hikcentral) {
+    const cams = [...val('zCameras', []), ...val('hikCameras', [])];
     stats.devices = stats.devices || {};
     stats.devices.cameras = countUpDown(cams, (c) => (c.available !== undefined ? c.available === 1 : c.online === true));
+  }
+
+  if (failed.size > 0) {
+    stats.partial = true;
+    stats.failed  = [...failed];
   }
 
   return stats;

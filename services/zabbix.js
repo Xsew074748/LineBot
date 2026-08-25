@@ -75,47 +75,68 @@ async function getProblems(limit = 200) {
   });
 }
 
+// Zabbix เวอร์ชันปัจจุบันไม่คืน host-level "available" แล้ว (host.get output ไม่มี key นี้เลย
+// แม้จะขอ) — มีแค่ interfaces[].available ต่อ interface — ใช้ตัวแรกแทน
+// interface available: 0=unknown, 1=available, 2=unavailable (ความหมายเดียวกับ host-level เดิม)
+// ถ้า host ไม่มี interface เลย (edge case) → fallback ไปดู status แทน (0=monitored ถือว่า available)
+function computeAvailable(h) {
+  const iface = (h.interfaces || [])[0];
+  if (iface) {
+    const parsed = parseInt(iface.available, 10);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return parseInt(h.status, 10) === 0 ? 1 : 0;
+}
+
 // ── ดึง Host ทั้งหมด พร้อมสถานะ ───────────────────────────────────────────────
 async function getHosts(limit = 100) {
   const hosts = await rpc('host.get', {
-    output: ['hostid', 'host', 'name', 'status', 'available'],
+    output: ['hostid', 'host', 'name', 'status'],
     selectGroups: ['groupid', 'name'],
-    selectInterfaces: ['ip'],
+    selectInterfaces: ['ip', 'available'],
     monitored_hosts: 1,
     sortfield: 'name',
     limit,
   });
 
   const AVAIL = { 0: '❓ ไม่ทราบ', 1: '🟢 ออนไลน์', 2: '🔴 ออฟไลน์' };
-  return (hosts || []).map((h) => ({
-    id:        h.hostid,
-    name:      h.name || h.host,
-    available: parseInt(h.available, 10),
-    status:    AVAIL[parseInt(h.available, 10)] || '❓',
-    groups:    h.groups?.map((g) => g.name).join(', ') || '',
-    // ส่ง interfaces ให้ adapter/MCP และ formatter ใช้อ่าน IP (แสดงต่อท้ายชื่อใน Flex)
-    interfaces: h.interfaces || [],
-  }));
+  return (hosts || []).map((h) => {
+    const available = computeAvailable(h);
+    return {
+      id:        h.hostid,
+      name:      h.name || h.host,
+      available,
+      status:    AVAIL[available] || '❓',
+      groups:    h.groups?.map((g) => g.name).join(', ') || '',
+      // ส่ง interfaces ให้ adapter/MCP และ formatter ใช้อ่าน IP (แสดงต่อท้ายชื่อใน Flex)
+      interfaces: h.interfaces || [],
+    };
+  });
 }
 
 // ── ดึง Host ใน Group "Camera" ────────────────────────────────────────────────
 async function getCameras() {
   const hosts = await rpc('host.get', {
-    output: ['hostid', 'host', 'name', 'available'],
+    output: ['hostid', 'host', 'name', 'status'],
     selectGroups: ['name'],
+    selectInterfaces: ['ip', 'available'],
     groupids: await getCameraGroupIds(),
     monitored_hosts: 1,
     sortfield: 'name',
   });
 
   const AVAIL = { 0: '❓ ไม่ทราบ', 1: '🟢 ออนไลน์', 2: '🔴 ออฟไลน์' };
-  return (hosts || []).map((h) => ({
-    id:        h.hostid,
-    name:      h.name || h.host,
-    available: parseInt(h.available, 10),
-    status:    AVAIL[parseInt(h.available, 10)] || '❓',
-    groups:    h.groups?.map((g) => g.name).join(', ') || '',
-  }));
+  return (hosts || []).map((h) => {
+    const available = computeAvailable(h);
+    return {
+      id:        h.hostid,
+      name:      h.name || h.host,
+      available,
+      status:    AVAIL[available] || '❓',
+      groups:    h.groups?.map((g) => g.name).join(', ') || '',
+      interfaces: h.interfaces || [],
+    };
+  });
 }
 
 // หา groupid ที่ชื่อมีคำว่า camera, กล้อง, cctv, nvr, dvr
