@@ -14,6 +14,7 @@ const fmt       = require('./services/formatter');
 const ai        = require('./services/ai');
 const validator = require('./services/validator');
 const { correlate } = require('./services/correlate');
+const statsService = require('./services/stats');
 
 const setupAuth   = require('./middleware/setupAuth');
 const setupRouter = require('./routes/setup');
@@ -74,6 +75,10 @@ const cameraCache = { data: null, expireAt: 0 };
 // Offline camera background cache (ใช้กับ "กล้องดับ" — อัปเดตโดย poller)
 const OFFLINE_CAM_POLL_MS = 90_000; // 90 วินาที
 const offlineCamCache = { raw: null, refreshedAt: 0 };
+
+// /stats cache — กัน Manager poll ถี่ (ทุก 5 นาที) ยิง API upstream ซ้ำเกินจำเป็น
+const STATS_CACHE_TTL_MS = 60 * 1000;
+const statsCache = { data: null, expireAt: 0 };
 
 // Per-user context สำหรับ on-demand AI analysis (TTL 10 นาที)
 const CONTEXT_TTL_MS = 10 * 60 * 1000;
@@ -142,6 +147,23 @@ function verifyLineSignature(body, signature) {
 // ── /health endpoint ───────────────────────────────────────────────────────────
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'IT Monitor Bot', monitorsLoaded: Object.keys(enabledMonitors) });
+});
+
+// ── /stats endpoint (NetGuard Manager poll ทุก 5 นาที เก็บสถิติ) ─────────────
+// cache 60 วินาที กัน manager poll ถี่ยิง API upstream ซ้ำ — เหมือน /health ไม่ต้อง auth
+app.get('/stats', async (req, res) => {
+  if (statsCache.data && Date.now() < statsCache.expireAt) {
+    return res.json(statsCache.data);
+  }
+  const stats = await statsService.buildStats({
+    monitorKeys: Object.keys(enabledMonitors),
+    zabbix,
+    omada,
+    getCameras: (zabbix || hikcentral) ? getCamerasWithCache : null,
+  });
+  statsCache.data     = stats;
+  statsCache.expireAt = Date.now() + STATS_CACHE_TTL_MS;
+  res.json(stats);
 });
 
 // ── /webhook endpoint ──────────────────────────────────────────────────────────
