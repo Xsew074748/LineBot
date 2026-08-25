@@ -224,12 +224,12 @@ describe('zabbix.getHostMetrics()', () => {
   });
 });
 
-describe('zabbix.getHosts() — available มาจาก interfaces[0] (host-level available ถูก Zabbix เลิกคืนแล้ว)', () => {
+describe('zabbix.getHosts() — available มาจาก main interface (host-level available ถูก Zabbix เลิกคืนแล้ว)', () => {
   beforeEach(() => { resetHttpMocks(); });
 
   it('host มี interfaces[0].available = 1 → นับเป็น up (available=1)', async () => {
     axios.post.mockResolvedValue({ data: { result: [
-      { hostid: '1', host: 'srv01', name: 'srv01', status: '0', interfaces: [{ ip: '10.0.0.1', available: '1' }] },
+      { hostid: '1', host: 'srv01', name: 'srv01', status: '0', interfaces: [{ ip: '10.0.0.1', available: '1', main: '1' }] },
     ] } });
     const hosts = await zabbix.getHosts();
     expect(hosts[0].available).toBe(1);
@@ -237,7 +237,7 @@ describe('zabbix.getHosts() — available มาจาก interfaces[0] (host-le
 
   it('host มี interfaces[0].available = 2 → นับเป็น down (available=2)', async () => {
     axios.post.mockResolvedValue({ data: { result: [
-      { hostid: '2', host: 'srv02', name: 'srv02', status: '0', interfaces: [{ ip: '10.0.0.2', available: '2' }] },
+      { hostid: '2', host: 'srv02', name: 'srv02', status: '0', interfaces: [{ ip: '10.0.0.2', available: '2', main: '1' }] },
     ] } });
     const hosts = await zabbix.getHosts();
     expect(hosts[0].available).toBe(2);
@@ -249,6 +249,57 @@ describe('zabbix.getHosts() — available มาจาก interfaces[0] (host-le
     ] } });
     const hosts = await zabbix.getHosts();
     expect(hosts[0].available).toBe(1);
+  });
+
+  it('host มี 2 interfaces, main อยู่ตัวที่ 2 → ต้องอ่าน available จากตัวที่ 2 ไม่ใช่ตัวแรก', async () => {
+    axios.post.mockResolvedValue({ data: { result: [
+      { hostid: '4', host: 'srv04', name: 'srv04', status: '0', interfaces: [
+        { ip: '10.0.0.4', available: '2', main: '0' }, // ตัวแรก ไม่ใช่ main — ต้องไม่ถูกใช้
+        { ip: '10.0.0.5', available: '1', main: '1' }, // main จริง — ต้องอ่านจากตัวนี้
+      ] },
+    ] } });
+    const hosts = await zabbix.getHosts();
+    expect(hosts[0].available).toBe(1);
+  });
+});
+
+describe('zabbix.fetchOfflineCamerasRaw()', () => {
+  beforeEach(() => { resetHttpMocks(); });
+
+  it('คืนเฉพาะกล้องที่ available === 2 (filter ฝั่ง client หลังลบ server-side filter ที่ใช้ไม่ได้แล้ว)', async () => {
+    axios.post.mockImplementation((url, body) => {
+      if (body.method === 'hostgroup.get') {
+        return Promise.resolve({ data: { result: [{ groupid: '5', name: 'Camera' }] } });
+      }
+      if (body.method === 'host.get') {
+        return Promise.resolve({ data: { result: [
+          { hostid: '1', host: 'CAM-01', name: 'CAM-01', status: '0', interfaces: [{ ip: '10.0.0.1', available: '1', main: '1' }] },
+          { hostid: '2', host: 'CAM-02', name: 'CAM-02', status: '0', interfaces: [{ ip: '10.0.0.2', available: '2', main: '1' }] },
+          { hostid: '3', host: 'CAM-03', name: 'CAM-03', status: '0', interfaces: [{ ip: '10.0.0.3', available: '2', main: '1' }] },
+        ] } });
+      }
+      if (body.method === 'problem.get') {
+        return Promise.resolve({ data: { result: [] } });
+      }
+      return Promise.reject(new Error('unexpected method ' + body.method));
+    });
+
+    const raw = await zabbix.fetchOfflineCamerasRaw();
+    expect(raw.total).toBe(2);
+    expect(raw.allOffline.map((h) => h.host)).toEqual(['CAM-02', 'CAM-03']);
+  });
+
+  it('ไม่มีกล้องในกลุ่มเลย (edge case) → คืนค่าว่างไม่ throw', async () => {
+    axios.post.mockImplementation((url, body) => {
+      if (body.method === 'hostgroup.get') {
+        return Promise.resolve({ data: { result: [] } });
+      }
+      return Promise.reject(new Error('unexpected method ' + body.method));
+    });
+
+    const raw = await zabbix.fetchOfflineCamerasRaw();
+    expect(raw.total).toBe(0);
+    expect(raw.allOffline).toEqual([]);
   });
 });
 

@@ -75,12 +75,19 @@ async function getProblems(limit = 200) {
   });
 }
 
+// เลือก main interface ก่อน (main ไม่การันตีลำดับใน array เมื่อ host มีหลาย interface)
+// ถ้าไม่มี interface ไหนตั้ง main เลย → fallback ไปตัวแรก — ใช้ร่วมกันทุกจุดกัน logic drift
+function pickMainInterface(interfaces) {
+  const ifaces = interfaces || [];
+  return ifaces.find((i) => i.main === '1' || i.main === 1) || ifaces[0] || null;
+}
+
 // Zabbix เวอร์ชันปัจจุบันไม่คืน host-level "available" แล้ว (host.get output ไม่มี key นี้เลย
-// แม้จะขอ) — มีแค่ interfaces[].available ต่อ interface — ใช้ตัวแรกแทน
+// แม้จะขอ) — มีแค่ interfaces[].available ต่อ interface
 // interface available: 0=unknown, 1=available, 2=unavailable (ความหมายเดียวกับ host-level เดิม)
 // ถ้า host ไม่มี interface เลย (edge case) → fallback ไปดู status แทน (0=monitored ถือว่า available)
 function computeAvailable(h) {
-  const iface = (h.interfaces || [])[0];
+  const iface = pickMainInterface(h.interfaces);
   if (iface) {
     const parsed = parseInt(iface.available, 10);
     return Number.isFinite(parsed) ? parsed : 0;
@@ -93,7 +100,7 @@ async function getHosts(limit = 100) {
   const hosts = await rpc('host.get', {
     output: ['hostid', 'host', 'name', 'status'],
     selectGroups: ['groupid', 'name'],
-    selectInterfaces: ['ip', 'available'],
+    selectInterfaces: ['ip', 'available', 'main'],
     monitored_hosts: 1,
     sortfield: 'name',
     limit,
@@ -119,7 +126,7 @@ async function getCameras() {
   const hosts = await rpc('host.get', {
     output: ['hostid', 'host', 'name', 'status'],
     selectGroups: ['name'],
-    selectInterfaces: ['ip', 'available'],
+    selectInterfaces: ['ip', 'available', 'main'],
     groupids: await getCameraGroupIds(),
     monitored_hosts: 1,
     sortfield: 'name',
@@ -173,16 +180,19 @@ async function fetchOfflineCamerasRaw() {
   const groupIds = await getCameraGroupIds();
   if (!groupIds.length) return { allOffline: [], total: 0, groups: [], clockMap: {} };
 
-  // host.get กรอง available=2 ที่ server — ไม่ดึง host ทั้งหมดมากรองเอง
-  const allOffline = await rpc('host.get', {
-    output: ['hostid', 'host', 'name'],
+  // ดึง host ทั้งหมดในกลุ่มกล้องมา filter ฝั่ง client ด้วย computeAvailable()
+  // (เดิม filter server-side ด้วย host-level available='2' ซึ่ง Zabbix เวอร์ชันนี้ไม่คืนค่านั้นแล้ว
+  // จึงไม่เคย match อะไรเลย — ต้องขอ 'available' ผ่าน selectInterfaces แทน)
+  const cameraHosts = await rpc('host.get', {
+    output: ['hostid', 'host', 'name', 'status'],
     groupids: groupIds,
-    filter: { available: '2' },
-    selectInterfaces: ['ip', 'type', 'main'],
+    selectInterfaces: ['ip', 'available', 'main', 'type'],
     selectInventory: ['location'],
     monitored_hosts: 1,
     sortfield: 'name',
   });
+
+  const allOffline = (cameraHosts || []).filter((h) => computeAvailable(h) === 2);
 
   const total = allOffline.length;
 
@@ -237,7 +247,7 @@ function pageOfflineCameras(page = 1, raw) {
   const now        = Math.floor(Date.now() / 1000);
 
   const cameras = paged.map((h) => {
-    const iface   = (h.interfaces || []).find((i) => i.main === '1') || h.interfaces?.[0] || {};
+    const iface   = pickMainInterface(h.interfaces) || {};
     const clock   = clockMap[h.hostid] || null;
     const durSec  = clock ? now - clock : null;
     return {
