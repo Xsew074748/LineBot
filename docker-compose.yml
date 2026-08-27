@@ -47,8 +47,10 @@ services:
       - line-bot
     volumes:
       - C:/Users/phatt/.cloudflared:/etc/cloudflared:ro
-    # ใช้ tunnel id จาก config.yml โดยตรง (ไม่ระบุชื่อ กัน name mismatch)
-    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    # token mode auth + config.yml สำหรับ ingress (locally-managed tunnel, ตั้ง route ใน Dashboard ไม่ได้)
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
     networks:
       - bot-net
 
