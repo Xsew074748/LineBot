@@ -104,9 +104,14 @@ const ROLE_HIERARCHY = [ROLES.ADMIN, ROLES.IT_STAFF, ROLES.VIEWER, ROLES.PENDING
 
 // คำสั่งที่ต้องการ role ขั้นต่ำ
 // ── AI Config ──────────────────────────────────────────────────────────────────
+// provider เลือกได้ 3 เจ้า: claude (default) / gemini / openai — ตั้งผ่าน AI_PROVIDER
+// ANTHROPIC_API_KEY ยัง required เหมือนเดิม (เป็น fallback บังคับเมื่อ provider อื่นไม่มี key
+// — ดู services/ai-providers/index.js getProvider() สำหรับ logic การเลือก/fallback จริง)
+// GEMINI_API_KEY / OPENAI_API_KEY เป็น optional — ใส่เฉพาะเมื่อจะใช้เจ้านั้น
 const AI_CONFIG = {
   allowedRoles: [ROLES.ADMIN, ROLES.IT_STAFF],
   dailyQuota:   parseInt(process.env.AI_DAILY_QUOTA || '20', 10),
+  provider:     (process.env.AI_PROVIDER || 'claude').toLowerCase(),
 };
 
 // Rate limit เข้มงวดสำหรับ pending user (กัน spam ระหว่างรออนุมัติ)

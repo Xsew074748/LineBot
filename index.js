@@ -12,6 +12,7 @@ const logger    = require('./services/logger');
 const auth      = require('./services/auth');
 const fmt       = require('./services/formatter');
 const ai        = require('./services/ai');
+const aiProviders = require('./services/ai-providers');
 const validator = require('./services/validator');
 const { correlate } = require('./services/correlate');
 const statsService = require('./services/stats');
@@ -146,9 +147,25 @@ function verifyLineSignature(body, signature) {
   }
 }
 
+// ชื่อ AI provider ที่ใช้งานจริงอยู่ตอนนี้ (หลัง fallback แล้ว) — ให้ Manager ทำ badge ต่อ
+// ห่อ try/catch เพราะ getProvider() throw ได้ถ้าไม่มี ANTHROPIC_API_KEY เลย
+// (ไม่ควรทำให้ /health และ /stats พังไปด้วยแค่เพราะ key หาย)
+function getActiveAiProviderName() {
+  try {
+    return aiProviders.getProvider().name;
+  } catch (err) {
+    return null;
+  }
+}
+
 // ── /health endpoint ───────────────────────────────────────────────────────────
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'IT Monitor Bot', monitorsLoaded: Object.keys(enabledMonitors) });
+  res.json({
+    status: 'ok',
+    service: 'IT Monitor Bot',
+    monitorsLoaded: Object.keys(enabledMonitors),
+    aiProvider: getActiveAiProviderName(),
+  });
 });
 
 // ── /stats endpoint (NetGuard Manager poll ทุก 5 นาที เก็บสถิติ) ─────────────
@@ -157,7 +174,7 @@ app.get('/health', (req, res) => {
 // แต่ยังกันชนไม่ให้ manager poll ถี่ยิง API upstream ซ้ำระหว่างที่ upstream กำลังมีปัญหา
 app.get('/stats', async (req, res) => {
   if (statsCache.data && Date.now() < statsCache.expireAt) {
-    return res.json(statsCache.data);
+    return res.json({ ...statsCache.data, aiProvider: getActiveAiProviderName() });
   }
   const stats = await statsService.buildStats({
     monitorKeys: Object.keys(enabledMonitors),
@@ -165,6 +182,7 @@ app.get('/stats', async (req, res) => {
     omada,
     hikcentral,
   });
+  stats.aiProvider    = getActiveAiProviderName();
   statsCache.data     = stats;
   statsCache.expireAt = Date.now() + (stats.partial ? STATS_PARTIAL_CACHE_TTL_MS : STATS_CACHE_TTL_MS);
   res.json(stats);

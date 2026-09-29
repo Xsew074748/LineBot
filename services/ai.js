@@ -1,10 +1,6 @@
 'use strict';
 require('dotenv').config();
-const Anthropic = require('@anthropic-ai/sdk');
-const logger    = require('./logger');
-
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const MODEL  = 'claude-haiku-4-5';
+const { getProvider } = require('./ai-providers');
 
 // ── System prompts ────────────────────────────────────────────────────────────
 
@@ -28,39 +24,18 @@ const CORRELATION_SYSTEM_PROMPT = `คุณคือผู้ช่วยวิ
 3. เมื่อชี้สาเหตุ ให้บอกระดับความมั่นใจ (น่าจะ/อาจจะ/ไม่แน่ใจ) และอ้างอิงว่าดูจากข้อมูลอะไร
 4. ปิดท้ายทุกครั้งด้วย: "⚠️ นี่คือการวิเคราะห์เบื้องต้นโดย AI โปรดตรวจสอบหน้างานก่อนดำเนินการ"`;
 
-// ── Internal: ยิง Claude API พร้อม retry 1 ครั้ง ────────────────────────────────
-// ล้มเหลวทั้ง 2 ครั้ง → throw ให้ caller จัดการ (withAI จะไม่หัก quota)
-async function callClaude(systemPrompt, userPrompt, maxTokens = 500) {
-  const start = Date.now();
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
-      const msg = await client.messages.create({
-        model:      MODEL,
-        max_tokens: maxTokens,
-        system:     systemPrompt,
-        messages:   [{ role: 'user', content: userPrompt }],
-      });
-
-      const inputT  = msg.usage?.input_tokens  || 0;
-      const outputT = msg.usage?.output_tokens || 0;
-      logger.aiCall('ask', inputT, outputT, Date.now() - start);
-
-      return msg.content[0]?.text?.trim() || '(ไม่มีคำตอบ)';
-    } catch (err) {
-      if (attempt === 1) {
-        logger.warn(`ai: attempt 1 ล้มเหลว: ${err.message} — กำลัง retry`);
-        continue;
-      }
-      logger.error('ai: Claude API ล้มเหลวทั้ง 2 ครั้ง', err);
-      throw err;
-    }
-  }
+// ── Internal: เรียก AI ผ่าน provider ที่เลือกไว้ (claude/gemini/openai) ────────
+// retry logic (1 ครั้ง) อยู่ในตัว provider adapter เองแล้ว (services/ai-providers/*.js)
+// ล้มเหลว → throw ให้ caller จัดการ (withAI ใน index.js จะไม่หัก quota)
+async function callAI(systemPrompt, userPrompt, maxTokens = 500) {
+  const { module: provider } = getProvider();
+  return provider.complete({ systemPrompt, userPrompt, maxTokens });
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────────
 
 async function ask(userPrompt, maxTokens = 500) {
-  return callClaude(SYSTEM_PROMPT, userPrompt, maxTokens);
+  return callAI(SYSTEM_PROMPT, userPrompt, maxTokens);
 }
 
 // ── วิเคราะห์ Alert: สาเหตุ ผลกระทบ วิธีแก้ไข วิธีป้องกัน ───────────────────
@@ -148,7 +123,7 @@ ${deviceLines}${more}
 2. สิ่งที่ต้องตรวจสอบทันที
 3. ขั้นตอนแก้ไข`;
 
-  return callClaude(CORRELATION_SYSTEM_PROMPT, prompt, 600);
+  return callAI(CORRELATION_SYSTEM_PROMPT, prompt, 600);
 }
 
 module.exports = { analyzeAlert, chat, summarize, analyzeCorrelation };
