@@ -13,8 +13,13 @@ jest.mock('@anthropic-ai/sdk', () => jest.fn().mockImplementation(() => ({ messa
 
 const { getProvider } = require('../services/ai-providers');
 const claudeProvider = require('../services/ai-providers/claude');
+const retry = require('../services/ai-providers/retry');
+const logger = require('../services/logger');
 const geminiProvider = require('../services/ai-providers/gemini');
 const openaiProvider = require('../services/ai-providers/openai');
+
+// backoff ของ retry จริงคือ 2s/4s — ในเทสตั้งให้เกือบ 0 เพื่อไม่ต้องรอ (ค่าที่ใช้จริงตรวจแยกด้วย spy ใน describe backoff)
+process.env.AI_RETRY_BASE_MS = '1';
 
 const ORIGINAL_ENV = { ...process.env };
 const KEYS_TO_CLEAR = ['AI_PROVIDER', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'OPENAI_API_KEY'];
@@ -126,18 +131,18 @@ describe('ai-providers/gemini — parse response ตาม shape จริงข
     expect(global.fetch).toHaveBeenCalledTimes(2);
   });
 
-  test('throw หลัง fail ครบ 2 ครั้ง', async () => {
+  test('throw หลัง fail ครบ 3 ครั้ง', async () => {
     process.env.GEMINI_API_KEY = 'gm-test';
     global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 403, text: async () => 'forbidden' });
     await expect(geminiProvider.complete({ systemPrompt: 's', userPrompt: 'u' })).rejects.toThrow();
-    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(global.fetch).toHaveBeenCalledTimes(3);
   });
 
   test('throw เมื่อ response ไม่มี candidates/text (shape ผิดคาด)', async () => {
     process.env.GEMINI_API_KEY = 'gm-test';
     global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ candidates: [] }) });
     await expect(geminiProvider.complete({ systemPrompt: 's', userPrompt: 'u' })).rejects.toThrow(/finishReason: unknown/);
-    expect(global.fetch).toHaveBeenCalledTimes(2); // retry ด้วยเพราะถือเป็นความล้มเหลวเหมือนกัน
+    expect(global.fetch).toHaveBeenCalledTimes(3); // retry ด้วยเพราะถือเป็นความล้มเหลวเหมือนกัน
   });
 
   test('throw พร้อมระบุ finishReason: MAX_TOKENS เมื่อ thinking กิน token จนไม่เหลือคำตอบ', async () => {
@@ -195,11 +200,11 @@ describe('ai-providers/openai — parse response ตาม shape จริงข
     expect(global.fetch).toHaveBeenCalledTimes(2);
   });
 
-  test('throw หลัง fail ครบ 2 ครั้ง', async () => {
+  test('throw หลัง fail ครบ 3 ครั้ง', async () => {
     process.env.OPENAI_API_KEY = 'oa-test';
     global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 401, text: async () => 'unauthorized' });
     await expect(openaiProvider.complete({ systemPrompt: 's', userPrompt: 'u' })).rejects.toThrow();
-    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(global.fetch).toHaveBeenCalledTimes(3);
   });
 });
 
@@ -246,7 +251,7 @@ describe('ai-providers — timeout เมื่อผู้ให้บริก
     const err = await geminiProvider.complete({ systemPrompt: 's', userPrompt: 'u' }).catch((e) => e);
     expect(err.isTimeout).toBeUndefined();
     expect(err.status).toBe(503);
-    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(global.fetch).toHaveBeenCalledTimes(3);
   });
 
   test('ตอบทันเวลา → ไม่ timeout และส่ง signal ให้ fetch', async () => {
@@ -262,5 +267,146 @@ describe('ai-providers — timeout เมื่อผู้ให้บริก
     expect(DEFAULT_AI_TIMEOUT_MS).toBe(45000);
     process.env.AI_TIMEOUT_MS = '-5';
     expect(getTimeoutMs()).toBe(45000);
+  });
+});
+
+// ── retry 3 attempt + backoff + diagnostics ที่ปลอดภัย ─────────────────────────────────────────────
+const jsonRes = (status, body, headers = {}) => ({
+  ok: false, status,
+  headers: { get: (k) => headers[k.toLowerCase()] ?? null },
+  text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
+});
+const okGemini = { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: 'สำเร็จ' }] } }] }) };
+const logLines = (fn) => fn.mock.calls.map((c) => c.map((x) => (x instanceof Error ? x.message : String(x))).join(' '));
+const allLogs = () => [...logLines(logger.warn), ...logLines(logger.error)].join('\n');
+
+describe('retry: 3 attempt + backoff (ใช้ค่า backoff จริง 2s/4s ตรวจผ่าน spy ไม่รอจริง)', () => {
+  let sleepSpy;
+  beforeEach(() => {
+    resetEnv();
+    delete process.env.AI_RETRY_BASE_MS; // ใช้ค่า default จริง (2000)
+    process.env.GEMINI_API_KEY = 'gm-test';
+    process.env.OPENAI_API_KEY = 'oa-test';
+    sleepSpy = jest.spyOn(retry.timers, 'sleep').mockResolvedValue();
+    logger.warn.mockClear(); logger.error.mockClear();
+  });
+  afterEach(() => { sleepSpy.mockRestore(); process.env.AI_RETRY_BASE_MS = '1'; });
+
+  test('503 สองครั้งแล้ว attempt 3 สำเร็จ → ได้ผลลัพธ์ และ backoff = 2000ms แล้ว 4000ms', async () => {
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce(jsonRes(503, {}))
+      .mockResolvedValueOnce(jsonRes(503, {}))
+      .mockResolvedValueOnce(okGemini);
+    expect(await geminiProvider.complete({ systemPrompt: 's', userPrompt: 'u' })).toBe('สำเร็จ');
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(sleepSpy.mock.calls.map((c) => c[0])).toEqual([2000, 4000]);
+  });
+
+  test('503 ตลอด → เรียก 3 ครั้ง backoff 2 ครั้ง แล้ว throw (status 503)', async () => {
+    global.fetch = jest.fn().mockResolvedValue(jsonRes(503, {}));
+    const err = await openaiProvider.complete({ systemPrompt: 's', userPrompt: 'u' }).catch((e) => e);
+    expect(err.status).toBe(503);
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(sleepSpy).toHaveBeenCalledTimes(2);
+  });
+
+  test('429 ก็ backoff เหมือน 503', async () => {
+    global.fetch = jest.fn().mockResolvedValueOnce(jsonRes(429, {})).mockResolvedValueOnce(okGemini);
+    await geminiProvider.complete({ systemPrompt: 's', userPrompt: 'u' });
+    expect(sleepSpy.mock.calls.map((c) => c[0])).toEqual([2000]);
+  });
+
+  test('error อื่น (403) retry ทันทีเหมือนเดิม ไม่ backoff', async () => {
+    global.fetch = jest.fn().mockResolvedValue(jsonRes(403, {}));
+    await geminiProvider.complete({ systemPrompt: 's', userPrompt: 'u' }).catch(() => {});
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(sleepSpy).not.toHaveBeenCalled();
+  });
+
+  test('maxAttempts:1 (ปุ่มทดสอบการเชื่อมต่อ) → ไม่ retry ไม่ backoff', async () => {
+    global.fetch = jest.fn().mockResolvedValue(jsonRes(503, {}));
+    await geminiProvider.complete({ systemPrompt: 's', userPrompt: 'u', maxAttempts: 1 }).catch(() => {});
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(sleepSpy).not.toHaveBeenCalled();
+  });
+
+  test('timeout ยังไม่ retry และไม่ backoff (พฤติกรรมจากรอบก่อน)', async () => {
+    process.env.AI_TIMEOUT_MS = '40';
+    global.fetch = jest.fn((url, opts) => hangUntilAborted(opts.signal));
+    const err = await geminiProvider.complete({ systemPrompt: 's', userPrompt: 'u' }).catch((e) => e);
+    expect(err.isTimeout).toBe(true);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(sleepSpy).not.toHaveBeenCalled();
+    delete process.env.AI_TIMEOUT_MS;
+  });
+
+  test('backoffMs: base×2^(n-1) และ env AI_RETRY_BASE_MS override ได้', () => {
+    expect([1, 2, 3].map(retry.backoffMs)).toEqual([2000, 4000, 8000]);
+    process.env.AI_RETRY_BASE_MS = '500';
+    expect([1, 2].map(retry.backoffMs)).toEqual([500, 1000]);
+    process.env.AI_RETRY_BASE_MS = 'abc';
+    expect(retry.backoffMs(1)).toBe(2000);
+  });
+});
+
+describe('diagnostics: log ข้อมูล 503/429 แบบปลอดภัย', () => {
+  beforeEach(() => {
+    resetEnv();
+    process.env.AI_RETRY_BASE_MS = '1';
+    process.env.GEMINI_API_KEY = 'AIzaSyFAKE-KEY-1234567890';
+    process.env.OPENAI_API_KEY = 'sk-proj-FAKEKEY1234567890';
+    logger.warn.mockClear(); logger.error.mockClear();
+  });
+
+  test('Gemini 503: log มี status, retry-after, code (UNAVAILABLE) และ message สั้น — ไม่มี body ดิบ', async () => {
+    const body = { error: { code: 503, status: 'UNAVAILABLE', message: 'The model is overloaded. Please try again later.', details: [{ secret: 'LEAK-ME' }] } };
+    global.fetch = jest.fn().mockResolvedValue(jsonRes(503, body, { 'retry-after': '30' }));
+    await geminiProvider.complete({ systemPrompt: 's', userPrompt: 'u' }).catch(() => {});
+    const lines = allLogs();
+    expect(lines).toContain('retry-after=30');
+    expect(lines).toContain('code=UNAVAILABLE');
+    expect(lines).toContain('msg="The model is overloaded. Please try again later."');
+    expect(lines).toContain('attempt 1/3');
+    expect(lines).toContain('ล้มเหลวทั้ง 3 ครั้ง');
+    expect(lines).not.toContain('LEAK-ME'); // field นอก allowlist ไม่ถูก log
+  });
+
+  test('ข้อความ 429 ที่มี API key/รูปแบบ key ปนอยู่ ถูก redact', async () => {
+    const msg = 'quota for key=AIzaSyFAKE-KEY-1234567890 exceeded; also sk-proj-FAKEKEY1234567890 and Bearer abc.def.ghi';
+    global.fetch = jest.fn().mockResolvedValue(jsonRes(429, { error: { status: 'RESOURCE_EXHAUSTED', message: msg } }));
+    await geminiProvider.complete({ systemPrompt: 's', userPrompt: 'u' }).catch(() => {});
+    const lines = allLogs();
+    expect(lines).toContain('code=RESOURCE_EXHAUSTED');
+    expect(lines).not.toMatch(/AIzaSyFAKE|sk-proj-FAKE|abc\.def\.ghi/);
+  });
+
+  test('OpenAI 401 ที่สะท้อน key ใน message: ไม่ log message ของ 4xx (log แค่ code)', async () => {
+    const body = { error: { message: 'Incorrect API key provided: sk-proj-FAKEKEY1234567890.', type: 'invalid_request_error', code: 'invalid_api_key' } };
+    global.fetch = jest.fn().mockResolvedValue(jsonRes(401, body));
+    const err = await openaiProvider.complete({ systemPrompt: 's', userPrompt: 'u' }).catch((e) => e);
+    const lines = allLogs();
+    expect(lines).toContain('code=invalid_api_key');
+    expect(lines).not.toMatch(/sk-proj-FAKE|Incorrect API key/);
+    expect(err.message).not.toMatch(/sk-proj|Incorrect/); // ไม่มี body ใน Error เหมือนเดิม
+  });
+
+  test('retry-after / code ที่รูปแบบผิดปกติ ถูกทิ้ง (allowlist)', async () => {
+    global.fetch = jest.fn().mockResolvedValue(jsonRes(503, { error: { status: 'BAD CODE WITH SPACES; rm -rf', message: 'x' } }, { 'retry-after': 'a<script>b' }));
+    await geminiProvider.complete({ systemPrompt: 's', userPrompt: 'u' }).catch(() => {});
+    const lines = allLogs();
+    expect(lines).not.toContain('retry-after=');
+    expect(lines).not.toContain('code=');
+  });
+
+  test('Claude SDK error 503: สกัด diag จาก status/headers/error ของ SDK และ retry 3 ครั้ง', async () => {
+    const sdkErr = Object.assign(new Error('503 overloaded'), { status: 503, headers: { 'retry-after': '7' }, error: { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } } });
+    mockCreate.mockReset();
+    mockCreate.mockRejectedValue(sdkErr);
+    process.env.ANTHROPIC_API_KEY = 'ak-test';
+    await claudeProvider.complete({ systemPrompt: 's', userPrompt: 'u' }).catch(() => {});
+    const lines = allLogs();
+    expect(lines).toContain('retry-after=7');
+    expect(lines).toContain('code=overloaded_error');
+    expect(mockCreate).toHaveBeenCalledTimes(3);
   });
 });

@@ -2,6 +2,8 @@
 // เรียก OpenAI API ผ่าน REST (fetch) ตรงๆ ไม่ลง SDK ใหม่
 const logger = require('../logger');
 const { timeoutGuard } = require('./timeout');
+const { httpFailureDiag } = require('./diagnostics');
+const { withRetry, DEFAULT_MAX_ATTEMPTS } = require('./retry');
 
 const MODEL = 'gpt-4o';
 const ENDPOINT = 'https://api.openai.com/v1/chat/completions';
@@ -28,7 +30,11 @@ async function callOpenAI(systemPrompt, userPrompt, maxTokens, apiKey = process.
 
     if (!res.ok) {
       // ห้ามใส่ response body ใน Error — provider อาจสะท้อน API key กลับมา แล้ว logger จะเขียนลงไฟล์ log
-      throw Object.assign(new Error(`OpenAI API error (status ${res.status})`), { status: res.status });
+      // diag = ข้อมูลวินิจฉัยที่กรองแล้ว ใช้ log เท่านั้น ไม่อยู่ใน message (OpenAI สะท้อน key ในข้อความ 4xx จึงไม่ log message ของ 4xx)
+      throw Object.assign(new Error(`OpenAI API error (status ${res.status})`), {
+        status: res.status,
+        diag: await httpFailureDiag(res, apiKey),
+      });
     }
 
     const data = await res.json();
@@ -47,29 +53,18 @@ async function callOpenAI(systemPrompt, userPrompt, maxTokens, apiKey = process.
   }
 }
 
-// retry 1 ครั้งเหมือน claude.js — ล้มเหลวทั้ง 2 ครั้ง → throw ให้ caller จัดการ
-// apiKey/maxAttempts: ใช้ตอนทดสอบ key ที่ยังไม่บันทึก — ไม่ส่ง = ใช้ env + retry 1 ครั้ง
-async function complete({ systemPrompt, userPrompt, maxTokens = 500, apiKey, maxAttempts = 2 }) {
+// retry + backoff: ดู retry.js (3 attempt, รอ 2s/4s เมื่อเจอ 503/429) — ล้มเหลวครบ → throw ให้ caller จัดการ
+// apiKey/maxAttempts: ใช้ตอนทดสอบ key ที่ยังไม่บันทึก — ไม่ส่ง = ใช้ env + retry ตามค่า default
+async function complete({ systemPrompt, userPrompt, maxTokens = 500, apiKey, maxAttempts = DEFAULT_MAX_ATTEMPTS }) {
   const start = Date.now();
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
+  return withRetry({
+    provider: 'openai', label: 'OpenAI API', maxAttempts, logger,
+    attemptFn: async () => {
       const { text, inputTokens, outputTokens } = await callOpenAI(systemPrompt, userPrompt, maxTokens, apiKey || undefined);
       logger.aiCall('openai.complete', inputTokens, outputTokens, Date.now() - start);
       return text;
-    } catch (err) {
-      // หมดเวลารอ → ไม่ retry: รออีกรอบเท่ากับรอเป็น 2 เท่า ผู้ใช้จะรอนานเกินไป ให้ caller แจ้ง error ทันที
-      if (err.isTimeout) {
-        logger.error(`ai-providers/openai: ${err.message}`);
-        throw err;
-      }
-      if (attempt < maxAttempts) {
-        logger.warn(`ai-providers/openai: attempt 1 ล้มเหลว: ${err.message} — กำลัง retry`);
-        continue;
-      }
-      logger.error('ai-providers/openai: OpenAI API ล้มเหลวทั้ง 2 ครั้ง', err);
-      throw err;
-    }
-  }
+    },
+  });
 }
 
 module.exports = { complete };

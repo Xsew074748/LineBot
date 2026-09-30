@@ -3,6 +3,8 @@
 // shape ของ request/response ตรวจสอบจาก Google AI documentation แล้ว (ai.google.dev/api/generate-content)
 const logger = require('../logger');
 const { timeoutGuard } = require('./timeout');
+const { httpFailureDiag } = require('./diagnostics');
+const { withRetry, DEFAULT_MAX_ATTEMPTS } = require('./retry');
 
 // gemini-2.5-flash ถูกจำกัดสิทธิ์ใหม่โดย Google (ตอบ 404 แม้ ListModels จะยังเห็นชื่อรุ่นอยู่)
 // เปลี่ยนเป็นรุ่นปัจจุบันที่ยังใช้งานได้ และให้ override ผ่าน env ได้เผื่อ Google เปลี่ยนชื่อรุ่นอีกในอนาคต
@@ -29,7 +31,11 @@ async function callGemini(systemPrompt, userPrompt, maxTokens, apiKey = process.
 
     if (!res.ok) {
       // ห้ามใส่ response body ใน Error — provider อาจสะท้อน API key กลับมา แล้ว logger จะเขียนลงไฟล์ log
-      throw Object.assign(new Error(`Gemini API error (status ${res.status}, model ${MODEL})`), { status: res.status });
+      // diag = ข้อมูลวินิจฉัยที่กรองแล้ว (retry-after, error.status ฯลฯ) ใช้ log เท่านั้น ไม่อยู่ใน message
+      throw Object.assign(new Error(`Gemini API error (status ${res.status}, model ${MODEL})`), {
+        status: res.status,
+        diag: await httpFailureDiag(res, apiKey),
+      });
     }
 
     const data = await res.json();
@@ -52,29 +58,18 @@ async function callGemini(systemPrompt, userPrompt, maxTokens, apiKey = process.
   }
 }
 
-// retry 1 ครั้งเหมือน claude.js — ล้มเหลวทั้ง 2 ครั้ง → throw ให้ caller จัดการ
-// apiKey/maxAttempts: ใช้ตอนทดสอบ key ที่ยังไม่บันทึก — ไม่ส่ง = ใช้ env + retry 1 ครั้ง
-async function complete({ systemPrompt, userPrompt, maxTokens = 500, apiKey, maxAttempts = 2 }) {
+// retry + backoff: ดู retry.js (3 attempt, รอ 2s/4s เมื่อเจอ 503/429) — ล้มเหลวครบ → throw ให้ caller จัดการ
+// apiKey/maxAttempts: ใช้ตอนทดสอบ key ที่ยังไม่บันทึก — ไม่ส่ง = ใช้ env + retry ตามค่า default
+async function complete({ systemPrompt, userPrompt, maxTokens = 500, apiKey, maxAttempts = DEFAULT_MAX_ATTEMPTS }) {
   const start = Date.now();
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
+  return withRetry({
+    provider: 'gemini', label: 'Gemini API', maxAttempts, logger,
+    attemptFn: async () => {
       const { text, inputTokens, outputTokens } = await callGemini(systemPrompt, userPrompt, maxTokens, apiKey || undefined);
       logger.aiCall('gemini.complete', inputTokens, outputTokens, Date.now() - start);
       return text;
-    } catch (err) {
-      // หมดเวลารอ → ไม่ retry: รออีกรอบเท่ากับรอเป็น 2 เท่า ผู้ใช้จะรอนานเกินไป ให้ caller แจ้ง error ทันที
-      if (err.isTimeout) {
-        logger.error(`ai-providers/gemini: ${err.message}`);
-        throw err;
-      }
-      if (attempt < maxAttempts) {
-        logger.warn(`ai-providers/gemini: attempt 1 ล้มเหลว: ${err.message} — กำลัง retry`);
-        continue;
-      }
-      logger.error('ai-providers/gemini: Gemini API ล้มเหลวทั้ง 2 ครั้ง', err);
-      throw err;
-    }
-  }
+    },
+  });
 }
 
 module.exports = { complete, MODEL };
