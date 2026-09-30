@@ -175,3 +175,22 @@ describe('provider ไม่ใส่ response body ใน Error (กัน key 
     expect((await ct.testAiProvider('gemini', 'k')).message).toMatch(/API Key.*ไม่ถูกต้อง/);
   });
 });
+
+describe('describeError — timeout ของ AI provider', () => {
+  test('error ที่มี isTimeout → ข้อความไทยเรื่อง AI ตอบช้า (ไม่ใช่ "ตรวจสอบ URL")', () => {
+    const e = Object.assign(new Error('Gemini API: หมดเวลารอการตอบกลับ (timeout 45000ms)'), { code: 'ETIMEDOUT', isTimeout: true });
+    expect(ct.describeError(e)).toBe('AI ตอบช้าเกินกำหนด (หมดเวลารอ) ลองใหม่อีกครั้ง');
+  });
+  test('จับจากข้อความได้แม้ไม่มี flag (error ที่ถูก wrap ต่อ)', () => {
+    expect(ct.describeError(new Error('OpenAI API: หมดเวลารอการตอบกลับ (timeout 45000ms)'))).toMatch(/AI ตอบช้า/);
+  });
+  test('timeout เครือข่ายทั่วไปยังได้ข้อความเดิม', () => {
+    expect(ct.describeError(codeErr('ETIMEDOUT'))).toMatch(/ตรวจสอบ URL/);
+  });
+  test('testAiProvider: provider timeout → ok:false ข้อความไทย ไม่ throw', async () => {
+    jest.spyOn(gemini, 'complete').mockRejectedValueOnce(Object.assign(new Error('Gemini API: หมดเวลารอการตอบกลับ (timeout 45000ms)'), { isTimeout: true, code: 'ETIMEDOUT' }));
+    const r = await ct.testAiProvider('gemini', 'k');
+    expect(r).toEqual({ ok: false, message: 'AI ตอบช้าเกินกำหนด (หมดเวลารอ) ลองใหม่อีกครั้ง' });
+    jest.restoreAllMocks();
+  });
+});

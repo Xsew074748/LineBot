@@ -25,6 +25,11 @@ function describeError(err, { credLabel = 'ข้อมูลรับรอง'
   const raw    = String(err?.message || '');
   const code   = err?.code;
 
+  // timeout ของ AI provider (services/ai-providers/timeout.js) — เชื่อมต่อได้แต่ผู้ให้บริการไม่ตอบทัน
+  // ต้องแยกจาก timeout เครือข่ายด้านล่าง ไม่งั้นได้ข้อความ "ตรวจสอบ URL" ที่ไม่เกี่ยวกับ AI
+  if (err?.isTimeout || /หมดเวลารอการตอบกลับ/.test(raw)) {
+    return 'AI ตอบช้าเกินกำหนด (หมดเวลารอ) ลองใหม่อีกครั้ง';
+  }
   if (code === 'ECONNABORTED' || code === 'ETIMEDOUT' || err?.name === 'TimeoutError' || /timeout|timed out/i.test(raw)) {
     return 'เชื่อมต่อไม่ได้ ตรวจสอบ URL และเครือข่าย';
   }

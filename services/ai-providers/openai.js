@@ -1,41 +1,50 @@
 'use strict';
 // เรียก OpenAI API ผ่าน REST (fetch) ตรงๆ ไม่ลง SDK ใหม่
 const logger = require('../logger');
+const { timeoutGuard } = require('./timeout');
 
 const MODEL = 'gpt-4o';
 const ENDPOINT = 'https://api.openai.com/v1/chat/completions';
 
 async function callOpenAI(systemPrompt, userPrompt, maxTokens, apiKey = process.env.OPENAI_API_KEY || '') {
-  const res = await fetch(ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      max_tokens: maxTokens,
-    }),
-  });
+  const guard = timeoutGuard('OpenAI');
+  try {
+    const res = await fetch(ENDPOINT, {
+      signal: guard.signal,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        max_tokens: maxTokens,
+      }),
+    });
 
-  if (!res.ok) {
-    // ห้ามใส่ response body ใน Error — provider อาจสะท้อน API key กลับมา แล้ว logger จะเขียนลงไฟล์ log
-    throw Object.assign(new Error(`OpenAI API error (status ${res.status})`), { status: res.status });
+    if (!res.ok) {
+      // ห้ามใส่ response body ใน Error — provider อาจสะท้อน API key กลับมา แล้ว logger จะเขียนลงไฟล์ log
+      throw Object.assign(new Error(`OpenAI API error (status ${res.status})`), { status: res.status });
+    }
+
+    const data = await res.json();
+    const text = data.choices?.[0]?.message?.content;
+    if (!text) throw new Error('OpenAI API: ไม่มีคำตอบใน response');
+
+    return {
+      text: text.trim(),
+      inputTokens:  data.usage?.prompt_tokens     || 0,
+      outputTokens: data.usage?.completion_tokens || 0,
+    };
+  } catch (err) {
+    throw guard.wrap(err);
+  } finally {
+    guard.done();
   }
-
-  const data = await res.json();
-  const text = data.choices?.[0]?.message?.content;
-  if (!text) throw new Error('OpenAI API: ไม่มีคำตอบใน response');
-
-  return {
-    text: text.trim(),
-    inputTokens:  data.usage?.prompt_tokens     || 0,
-    outputTokens: data.usage?.completion_tokens || 0,
-  };
 }
 
 // retry 1 ครั้งเหมือน claude.js — ล้มเหลวทั้ง 2 ครั้ง → throw ให้ caller จัดการ
@@ -48,6 +57,11 @@ async function complete({ systemPrompt, userPrompt, maxTokens = 500, apiKey, max
       logger.aiCall('openai.complete', inputTokens, outputTokens, Date.now() - start);
       return text;
     } catch (err) {
+      // หมดเวลารอ → ไม่ retry: รออีกรอบเท่ากับรอเป็น 2 เท่า ผู้ใช้จะรอนานเกินไป ให้ caller แจ้ง error ทันที
+      if (err.isTimeout) {
+        logger.error(`ai-providers/openai: ${err.message}`);
+        throw err;
+      }
       if (attempt < maxAttempts) {
         logger.warn(`ai-providers/openai: attempt 1 ล้มเหลว: ${err.message} — กำลัง retry`);
         continue;

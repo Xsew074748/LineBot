@@ -3,6 +3,7 @@
 // ไม่ได้เขียนใหม่ แค่เปลี่ยน signature ให้ตรงกับ interface กลาง (base.js)
 const Anthropic = require('@anthropic-ai/sdk');
 const logger = require('../logger');
+const { timeoutGuard } = require('./timeout');
 
 const MODEL = 'claude-haiku-4-5';
 
@@ -18,26 +19,35 @@ async function complete({ systemPrompt, userPrompt, maxTokens = 500, apiKey, max
   const start = Date.now();
   const anthropic = apiKey ? new Anthropic({ apiKey, maxRetries: 0 }) : getClient();
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const guard = timeoutGuard('Claude');
     try {
       const msg = await anthropic.messages.create({
         model:      MODEL,
         max_tokens: maxTokens,
         system:     systemPrompt,
         messages:   [{ role: 'user', content: userPrompt }],
-      });
+      }, { signal: guard.signal });
 
       const inputT  = msg.usage?.input_tokens  || 0;
       const outputT = msg.usage?.output_tokens || 0;
       logger.aiCall('claude.complete', inputT, outputT, Date.now() - start);
 
       return msg.content[0]?.text?.trim() || '(ไม่มีคำตอบ)';
-    } catch (err) {
+    } catch (rawErr) {
+      const err = guard.wrap(rawErr);
+      // หมดเวลารอ → ไม่ retry: รออีกรอบเท่ากับรอเป็น 2 เท่า ผู้ใช้จะรอนานเกินไป ให้ caller แจ้ง error ทันที
+      if (err.isTimeout) {
+        logger.error(`ai-providers/claude: ${err.message}`);
+        throw err;
+      }
       if (attempt < maxAttempts) {
         logger.warn(`ai-providers/claude: attempt 1 ล้มเหลว: ${err.message} — กำลัง retry`);
         continue;
       }
       logger.error('ai-providers/claude: Claude API ล้มเหลวทั้ง 2 ครั้ง', err);
       throw err;
+    } finally {
+      guard.done();
     }
   }
 }

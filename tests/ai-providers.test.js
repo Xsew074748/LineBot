@@ -7,7 +7,12 @@ jest.mock('../services/logger', () => ({
   apiCall: jest.fn(), aiCall: jest.fn(), audit: jest.fn(), message: jest.fn(),
 }));
 
+// Anthropic SDK จำลอง: messages.create(body, { signal }) ค้างจนกว่า signal จะ abort แล้ว reject แบบเดียวกับ SDK จริง
+const mockCreate = jest.fn();
+jest.mock('@anthropic-ai/sdk', () => jest.fn().mockImplementation(() => ({ messages: { create: (...a) => mockCreate(...a) } })));
+
 const { getProvider } = require('../services/ai-providers');
+const claudeProvider = require('../services/ai-providers/claude');
 const geminiProvider = require('../services/ai-providers/gemini');
 const openaiProvider = require('../services/ai-providers/openai');
 
@@ -195,5 +200,67 @@ describe('ai-providers/openai — parse response ตาม shape จริงข
     global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 401, text: async () => 'unauthorized' });
     await expect(openaiProvider.complete({ systemPrompt: 's', userPrompt: 'u' })).rejects.toThrow();
     expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ── timeout ของ provider (ตั้ง AI_TIMEOUT_MS สั้นๆ แค่ในเทส — ค่าจริง default 45 วินาที) ─────────────
+// fetch/SDK จำลองที่ "ค้าง" จนกว่าจะถูก abort ด้วย signal (เหมือนผู้ให้บริการที่ hang ไม่ตอบ)
+const hangUntilAborted = (signal) => new Promise((_, reject) => {
+  signal.addEventListener('abort', () => reject(Object.assign(new Error('The operation was aborted'), { name: 'AbortError' })));
+});
+
+describe('ai-providers — timeout เมื่อผู้ให้บริการค้างไม่ตอบ', () => {
+  beforeEach(() => {
+    resetEnv();
+    process.env.AI_TIMEOUT_MS = '60';
+    process.env.GEMINI_API_KEY = 'gm-test';
+    process.env.OPENAI_API_KEY = 'oa-test';
+    process.env.ANTHROPIC_API_KEY = 'ak-test';
+    mockCreate.mockReset();
+  });
+
+  test.each([
+    ['gemini', geminiProvider, 'Gemini API: หมดเวลารอการตอบกลับ (timeout 60ms)'],
+    ['openai', openaiProvider, 'OpenAI API: หมดเวลารอการตอบกลับ (timeout 60ms)'],
+  ])('%s: fetch ค้าง → throw error ระบุ timeout ชัดเจน (isTimeout) และไม่ retry', async (_n, provider, re) => {
+    global.fetch = jest.fn((url, opts) => hangUntilAborted(opts.signal));
+    const started = Date.now();
+    const err = await provider.complete({ systemPrompt: 's', userPrompt: 'u' }).catch((e) => e);
+    expect(err.message).toMatch(re);
+    expect(err.isTimeout).toBe(true);
+    expect(err.code).toBe('ETIMEDOUT');
+    expect(global.fetch).toHaveBeenCalledTimes(1); // ไม่ retry หลัง timeout — ไม่ให้ผู้ใช้รอเป็น 2 เท่า
+    expect(Date.now() - started).toBeLessThan(1500);
+  });
+
+  test('claude: SDK ค้าง → throw error ระบุ timeout ชัดเจน และไม่ retry', async () => {
+    mockCreate.mockImplementation((body, opts) => hangUntilAborted(opts.signal));
+    const err = await claudeProvider.complete({ systemPrompt: 's', userPrompt: 'u' }).catch((e) => e);
+    expect(err.message).toMatch('Claude API: หมดเวลารอการตอบกลับ (timeout 60ms)');
+    expect(err.isTimeout).toBe(true);
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+  });
+
+  test('error อื่นที่ไม่ใช่ timeout ยังถูก retry ตามเดิม (ไม่กระทบพฤติกรรมเดิม)', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 503, text: async () => '' });
+    const err = await geminiProvider.complete({ systemPrompt: 's', userPrompt: 'u' }).catch((e) => e);
+    expect(err.isTimeout).toBeUndefined();
+    expect(err.status).toBe(503);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  test('ตอบทันเวลา → ไม่ timeout และส่ง signal ให้ fetch', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: 'ok' }] } }] }) });
+    expect(await geminiProvider.complete({ systemPrompt: 's', userPrompt: 'u' })).toBe('ok');
+    expect(global.fetch.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  test('AI_TIMEOUT_MS ไม่ถูกต้อง → ใช้ค่า default 45 วินาที', () => {
+    const { getTimeoutMs, DEFAULT_AI_TIMEOUT_MS } = require('../services/ai-providers/timeout');
+    process.env.AI_TIMEOUT_MS = 'abc';
+    expect(getTimeoutMs()).toBe(DEFAULT_AI_TIMEOUT_MS);
+    expect(DEFAULT_AI_TIMEOUT_MS).toBe(45000);
+    process.env.AI_TIMEOUT_MS = '-5';
+    expect(getTimeoutMs()).toBe(45000);
   });
 });
