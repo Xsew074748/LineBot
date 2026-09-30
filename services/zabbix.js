@@ -20,16 +20,21 @@ const PRIORITY = {
 // ── ยิง JSON-RPC ไปที่ Zabbix ─────────────────────────────────────────────────
 // Zabbix 7.x: auth ย้ายออกจาก JSON body มาเป็น HTTP header "Authorization: Bearer"
 // apiinfo.version เป็น public method — ห้ามส่ง auth header เด็ดขาด (จะได้ [-32600])
-async function rpc(method, params, { auth = true } = {}) {
+// override: { url, apiToken, timeoutMs } — ใช้ตอนทดสอบ config ที่ยังไม่บันทึก (services/connection-test.js)
+// ไม่ส่งมา = ใช้ค่าจาก env เหมือนเดิม
+async function rpc(method, params, { auth = true, override = null } = {}) {
+  const baseUrl   = override?.url      ?? BASE_URL;
+  const apiToken  = override?.apiToken ?? API_TOKEN;
+  const timeoutMs  = override?.timeoutMs ?? TIMEOUT_MS;
   const start = Date.now();
   try {
     const headers = { 'Content-Type': 'application/json' };
-    if (auth) headers['Authorization'] = `Bearer ${API_TOKEN}`;
+    if (auth) headers['Authorization'] = `Bearer ${apiToken}`;
 
     const resp = await axios.post(
-      BASE_URL,
+      baseUrl,
       { jsonrpc: '2.0', method, params, id: 1 },
-      { headers, timeout: TIMEOUT_MS }
+      { headers, timeout: timeoutMs }
     );
     logger.apiCall('Zabbix', method, Date.now() - start);
 
@@ -364,4 +369,9 @@ async function healthCheck() {
   }
 }
 
-module.exports = { getProblems, getHosts, getCameras, getSummary, healthCheck, fetchOfflineCamerasRaw, pageOfflineCameras, findHosts, getHostMetrics };
+// ทดสอบ url + token ที่ส่งมา (ไม่แตะ env) — hostgroup.get 1 แถว ต้องผ่าน auth จริง
+async function checkAuth({ url, apiToken, timeoutMs = 5000 }) {
+  await rpc('hostgroup.get', { output: ['groupid'], limit: 1 }, { override: { url, apiToken, timeoutMs } });
+}
+
+module.exports = { checkAuth, getProblems, getHosts, getCameras, getSummary, healthCheck, fetchOfflineCamerasRaw, pageOfflineCameras, findHosts, getHostMetrics };

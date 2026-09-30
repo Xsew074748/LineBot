@@ -43,7 +43,7 @@ const hikHttp = axios.create({ httpsAgent: buildHttpsAgent(), timeout: 10_000 })
 //                x-ca-key:AppKey\nx-ca-timestamp:ts\n/path
 // header ที่ไม่ได้ส่ง (Content-MD5, Date) ต้องข้ามบรรทัดไปเลย ห้ามใส่บรรทัดว่าง
 // signature = Base64(HmacSHA256(stringToSign, AppSecret))
-function buildSignedHeaders(method, path) {
+function buildSignedHeaders(method, path, appKey = APP_KEY, appSecret = APP_SECRET) {
   const timestamp   = Date.now().toString();
   const accept      = '*/*';
   const contentType = 'application/json';
@@ -52,20 +52,20 @@ function buildSignedHeaders(method, path) {
     method.toUpperCase(),
     accept,
     contentType,
-    `x-ca-key:${APP_KEY}`,
+    `x-ca-key:${appKey}`,
     `x-ca-timestamp:${timestamp}`,
     path,
   ].join('\n');
 
   const signature = crypto
-    .createHmac('sha256', APP_SECRET)
+    .createHmac('sha256', appSecret)
     .update(stringToSign, 'utf8')
     .digest('base64');
 
   return {
     Accept:                   accept,
     'Content-Type':           contentType,
-    'X-Ca-Key':               APP_KEY,
+    'X-Ca-Key':               appKey,
     'X-Ca-Signature':         signature,
     'X-Ca-Signature-Headers': 'x-ca-key,x-ca-timestamp',
     'X-Ca-Timestamp':         timestamp,
@@ -74,11 +74,14 @@ function buildSignedHeaders(method, path) {
 }
 
 // ── POST helper — ทุก endpoint ของ artemis ใช้ POST ────────────────────────────
-async function hikPost(path, body = {}) {
+// override: { url, appKey, appSecret, timeoutMs } — ใช้ทดสอบ config ที่ยังไม่บันทึก ไม่ส่ง = ใช้ env
+async function hikPost(path, body = {}, override = null) {
   const start = Date.now();
   try {
-    const resp = await hikHttp.post(`${BASE_URL}${path}`, body, {
-      headers: buildSignedHeaders('POST', path),
+    const baseUrl = override?.url !== undefined ? override.url.replace(/\/+$/, '') : BASE_URL;
+    const resp = await hikHttp.post(`${baseUrl}${path}`, body, {
+      headers: buildSignedHeaders('POST', path, override?.appKey ?? APP_KEY, override?.appSecret ?? APP_SECRET),
+      ...(override?.timeoutMs ? { timeout: override.timeoutMs } : {}),
     });
     logger.apiCall('HikCentral', path, Date.now() - start);
 
@@ -226,7 +229,13 @@ async function healthCheck() {
   }
 }
 
+// ทดสอบ url/appKey/appSecret ที่ส่งมา — ขอ regions 1 แถว (endpoint เบาที่สุด)
+async function checkAuth(cfg) {
+  await hikPost('/artemis/api/resource/v1/regions', { pageNo: 1, pageSize: 1 }, { timeoutMs: 5000, ...cfg });
+}
+
 module.exports = {
+  checkAuth,
   getCameras,
   getCameraStatus,
   getCamerasByArea,

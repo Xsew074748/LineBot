@@ -49,6 +49,35 @@ app.get('/settings', setupAuth.lanOnly, setupAuth.requireLogin, (req, res) => {
 });
 app.use('/api/config', setupAuth.lanOnly, setupAuth.requireLogin, express.json(), configRouter);
 
+// ── POST /test-connection — ทดสอบ credentials ที่ยังไม่บันทึก (Manager Dashboard) ──
+// รับ URL/secret มาใช้ตรงๆ แล้วยิงออกไป → จำกัดเฉพาะ LAN (lanOnly) กัน SSRF จากภายนอก
+// ห้าม log body/config เด็ดขาด (มี secret) — ไม่มี request logger ตัวไหนอ่าน body ของ route นี้
+const connectionTest = require('./services/connection-test');
+const TEST_SYSTEMS = ['zabbix', 'omada', 'hikcentral', 'claude', 'gemini', 'openai'];
+app.post('/test-connection', setupAuth.lanOnly, express.json({ limit: '10kb' }), async (req, res) => {
+  const { system, config: cfg } = req.body || {};
+  if (typeof system !== 'string' || !TEST_SYSTEMS.includes(system)) {
+    return res.status(400).json({ ok: false, message: 'system ไม่ถูกต้อง' });
+  }
+  if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg) || Object.keys(cfg).length === 0) {
+    return res.status(400).json({ ok: false, message: 'config ต้องเป็น object และไม่ว่าง' });
+  }
+  let result;
+  try {
+    if (system === 'zabbix')          result = await connectionTest.testZabbix(cfg);
+    else if (system === 'omada')      result = await connectionTest.testOmada(cfg);
+    else if (system === 'hikcentral') result = await connectionTest.testHikCentral(cfg);
+    else                              result = await connectionTest.testAiProvider(system, cfg.apiKey);
+  } catch {
+    result = { ok: false, message: 'เกิดข้อผิดพลาดภายใน ลองใหม่อีกครั้ง' };
+  }
+  res.json({ ok: result.ok, message: result.message });
+});
+// JSON พัง/ใหญ่เกิน → ตอบไทยสั้นๆ แทน stack trace ของ express
+app.use('/test-connection', (err, req, res, next) => {
+  res.status(400).json({ ok: false, message: 'รูปแบบข้อมูลไม่ถูกต้อง (ต้องเป็น JSON)' });
+});
+
 // Rate limit ระดับ User (จัดการใน handler)
 const userCallCount = new Map(); // userId → { count, resetAt }
 

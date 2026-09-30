@@ -46,12 +46,20 @@ let accessToken = null;
 let tokenExpAt  = 0; // Unix ms
 
 // POST /openapi/authorize/token?grant_type=client_credentials
-async function fetchToken() {
+// cfg: { url, omadacId, clientId, clientSecret, timeoutMs } — ไม่ส่ง = ใช้ค่าจาก env
+// คืน { token, expiresIn } โดยไม่แตะ token cache (ใช้ทดสอบ config ที่ยังไม่บันทึกได้)
+async function requestToken(cfg = {}) {
+  const url      = (cfg.url ?? BASE_URL);
   const start = Date.now();
   try {
     const resp = await omadaHttp.post(
-      `${BASE_URL}/openapi/authorize/token?grant_type=client_credentials`,
-      { omadacId: OMADAC_ID, client_id: CLIENT_ID, client_secret: CLIENT_SECRET }
+      `${url}/openapi/authorize/token?grant_type=client_credentials`,
+      {
+        omadacId:      cfg.omadacId     ?? OMADAC_ID,
+        client_id:     cfg.clientId     ?? CLIENT_ID,
+        client_secret: cfg.clientSecret ?? CLIENT_SECRET,
+      },
+      cfg.timeoutMs ? { timeout: cfg.timeoutMs } : undefined
     );
     logger.apiCall('Omada', 'authorize/token', Date.now() - start);
 
@@ -60,15 +68,19 @@ async function fetchToken() {
 
     const { accessToken: token, expiresIn } = body.result || {};
     if (!token) throw new Error('Omada: /authorize/token ไม่คืน accessToken');
-
-    accessToken = token;
-    tokenExpAt  = Date.now() + (Number(expiresIn) > 0 ? Number(expiresIn) * 1000 : 2 * 60 * 60 * 1000);
-    logger.info(`omada: ออก access token สำเร็จ (หมดอายุใน ${expiresIn ?? '?'}s)`);
-    return accessToken;
+    return { token, expiresIn };
   } catch (err) {
     logger.apiCall('Omada', 'authorize/token', Date.now() - start, false);
     throw err;
   }
+}
+
+async function fetchToken() {
+  const { token, expiresIn } = await requestToken();
+  accessToken = token;
+  tokenExpAt  = Date.now() + (Number(expiresIn) > 0 ? Number(expiresIn) * 1000 : 2 * 60 * 60 * 1000);
+  logger.info(`omada: ออก access token สำเร็จ (หมดอายุใน ${expiresIn ?? '?'}s)`);
+  return accessToken;
 }
 
 // เรียกก่อนทุก request — ออก token ใหม่เมื่อยังไม่มี หรือใกล้หมดอายุ (< 5 นาที)
@@ -269,4 +281,4 @@ async function testConnection(baseUrl /*, username, password */) {
 }
 
 // http: axios instance ที่ฝัง httpsAgent ไว้แล้ว — ใช้ได้จากภายนอก (เช่น routes/config.js)
-module.exports = { getToken, getAPs, getClients, getSwitchPorts, getAlerts, healthCheck, testConnection, http: omadaHttp };
+module.exports = { requestToken, getToken, getAPs, getClients, getSwitchPorts, getAlerts, healthCheck, testConnection, http: omadaHttp };

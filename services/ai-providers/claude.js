@@ -13,11 +13,13 @@ function getClient() {
 }
 
 // ล้มเหลวทั้ง 2 ครั้ง → throw ให้ caller จัดการ (withAI จะไม่หัก quota)
-async function complete({ systemPrompt, userPrompt, maxTokens = 500 }) {
+// apiKey/maxAttempts: ใช้ตอนทดสอบ key ที่ยังไม่บันทึก (services/connection-test.js) — ไม่ส่ง = ใช้ env + retry 1 ครั้ง
+async function complete({ systemPrompt, userPrompt, maxTokens = 500, apiKey, maxAttempts = 2 }) {
   const start = Date.now();
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  const anthropic = apiKey ? new Anthropic({ apiKey, maxRetries: 0 }) : getClient();
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const msg = await getClient().messages.create({
+      const msg = await anthropic.messages.create({
         model:      MODEL,
         max_tokens: maxTokens,
         system:     systemPrompt,
@@ -30,7 +32,7 @@ async function complete({ systemPrompt, userPrompt, maxTokens = 500 }) {
 
       return msg.content[0]?.text?.trim() || '(ไม่มีคำตอบ)';
     } catch (err) {
-      if (attempt === 1) {
+      if (attempt < maxAttempts) {
         logger.warn(`ai-providers/claude: attempt 1 ล้มเหลว: ${err.message} — กำลัง retry`);
         continue;
       }

@@ -6,8 +6,8 @@ const logger = require('../logger');
 const MODEL = 'gemini-2.5-flash';
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 
-async function callGemini(systemPrompt, userPrompt, maxTokens) {
-  const url = `${ENDPOINT}?key=${encodeURIComponent(process.env.GEMINI_API_KEY || '')}`;
+async function callGemini(systemPrompt, userPrompt, maxTokens, apiKey = process.env.GEMINI_API_KEY || '') {
+  const url = `${ENDPOINT}?key=${encodeURIComponent(apiKey)}`;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -19,8 +19,8 @@ async function callGemini(systemPrompt, userPrompt, maxTokens) {
   });
 
   if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Gemini API ${res.status}: ${body.slice(0, 200)}`);
+    // ห้ามใส่ response body ใน Error — provider อาจสะท้อน API key กลับมา แล้ว logger จะเขียนลงไฟล์ log
+    throw Object.assign(new Error(`Gemini API error (status ${res.status})`), { status: res.status });
   }
 
   const data = await res.json();
@@ -35,15 +35,16 @@ async function callGemini(systemPrompt, userPrompt, maxTokens) {
 }
 
 // retry 1 ครั้งเหมือน claude.js — ล้มเหลวทั้ง 2 ครั้ง → throw ให้ caller จัดการ
-async function complete({ systemPrompt, userPrompt, maxTokens = 500 }) {
+// apiKey/maxAttempts: ใช้ตอนทดสอบ key ที่ยังไม่บันทึก — ไม่ส่ง = ใช้ env + retry 1 ครั้ง
+async function complete({ systemPrompt, userPrompt, maxTokens = 500, apiKey, maxAttempts = 2 }) {
   const start = Date.now();
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const { text, inputTokens, outputTokens } = await callGemini(systemPrompt, userPrompt, maxTokens);
+      const { text, inputTokens, outputTokens } = await callGemini(systemPrompt, userPrompt, maxTokens, apiKey || undefined);
       logger.aiCall('gemini.complete', inputTokens, outputTokens, Date.now() - start);
       return text;
     } catch (err) {
-      if (attempt === 1) {
+      if (attempt < maxAttempts) {
         logger.warn(`ai-providers/gemini: attempt 1 ล้มเหลว: ${err.message} — กำลัง retry`);
         continue;
       }
