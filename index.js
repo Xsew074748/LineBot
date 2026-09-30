@@ -135,16 +135,15 @@ function checkUserRateLimit(userId) {
 }
 
 // ── AI quota wrapper — ตรวจสอบสิทธิ์ + quota ก่อน call AI ─────────────────────
+// ข้อความเมื่อ canUseAI() ไม่ผ่าน — ใช้ร่วมกันระหว่าง withAI และ handleAnalyze
+function aiDenialMessage(check) {
+  if (check.reason === 'role') return 'คุณไม่มีสิทธิ์ใช้งาน AI (ต้องการ IT_STAFF ขึ้นไป)';
+  return `ใช้ AI ครบโควต้าวันนี้แล้ว (${check.used}/${check.limit} ครั้ง) — รีเซ็ตพรุ่งนี้`;
+}
+
 async function withAI(userId, replyToken, aiCall) {
   const check = auth.canUseAI(userId);
-  if (!check.ok) {
-    if (check.reason === 'role') {
-      return reply(replyToken, fmt.buildError('คุณไม่มีสิทธิ์ใช้งาน AI (ต้องการ IT_STAFF ขึ้นไป)'));
-    }
-    return reply(replyToken, fmt.buildError(
-      `ใช้ AI ครบโควต้าวันนี้แล้ว (${check.used}/${check.limit} ครั้ง) — รีเซ็ตพรุ่งนี้`
-    ));
-  }
+  if (!check.ok) return reply(replyToken, fmt.buildError(aiDenialMessage(check)));
   // AI ล้มเหลว (ai.js throw หลัง retry ครบ) → แจ้ง user โดยไม่หัก quota
   let result;
   try {
@@ -351,15 +350,55 @@ async function handlePostback(event) {
 }
 
 // ── AI วิเคราะห์รายอุปกรณ์ 2 layer — Layer 1 ตัว device, Layer 2 อุปกรณ์รอบข้าง ─
-async function handleAnalyze(data, userId, replyToken) {
-  return withAI(userId, replyToken, async () => {
-    // data = "analyze:{type}:{name}:{ip}" — name อาจมี ":" จึงตัด segment แรก/สุดท้ายออก
-    const parts = data.split(':');
-    const type  = parts[1] || '';
-    const rawIp = parts.length > 3 ? parts[parts.length - 1] : '-';
-    const name  = parts.slice(2, parts.length > 3 ? -1 : undefined).join(':') || '-';
-    const ip    = rawIp && rawIp !== '-' && rawIp !== 'N/A' ? rawIp : null;
+// Flow: ตรวจสิทธิ์/quota → reply "กำลังวิเคราะห์..." ทันที (ใช้ replyToken ครั้งเดียว) →
+// วิเคราะห์ต่อแบบ async แล้วส่งผลด้วย push (ไม่ผูกกับ replyToken ที่หมดอายุเร็ว)
+// เพราะ AI ที่ช้า/retry อาจใช้ 30+ วินาที ซึ่ง replyToken หมดอายุไปก่อนแล้ว
+// analyzeInFlight: userId → เวลาที่เริ่มวิเคราะห์ (in-memory) กันกดปุ่มซ้ำระหว่างรอผลจนเรียก AI + นับโควตาซ้ำ
+// ปลดล็อกใน finally เสมอ; ANALYZE_STALE_MS กันกรณี AI ค้างไม่ตอบ (fetch ของ Gemini/OpenAI ไม่มี timeout)
+// ไม่ให้ user ถูกล็อกถาวรจนกว่าจะ restart bot
+const analyzeInFlight = new Map();
+const ANALYZE_STALE_MS = 3 * 60 * 1000;
 
+async function handleAnalyze(data, userId, replyToken) {
+  const check = auth.canUseAI(userId);
+  if (!check.ok) return reply(replyToken, fmt.buildError(aiDenialMessage(check)));
+
+  // เช็ค+ล็อกต้องอยู่ก่อน await ตัวแรกเสมอ (JS single-thread) ไม่งั้นกดซ้ำเร็วๆ อาจลอดเข้ามาทั้งคู่
+  const startedAt = analyzeInFlight.get(userId);
+  if (startedAt && Date.now() - startedAt < ANALYZE_STALE_MS) {
+    return reply(replyToken, fmt.buildAiResponse('⏳ กำลังวิเคราะห์อยู่ กรุณารอสักครู่...'));
+  }
+  const token = Date.now();
+  analyzeInFlight.set(userId, token);
+  // ปลดเฉพาะล็อกของรอบนี้ — job เก่าที่ค้างจน stale แล้วเพิ่งจบ ต้องไม่ลบล็อกของรอบใหม่
+  const release = () => { if (analyzeInFlight.get(userId) === token) analyzeInFlight.delete(userId); };
+
+  try {
+    await reply(replyToken, fmt.buildAiResponse('🔍 กำลังวิเคราะห์ กรุณารอสักครู่...'));
+  } catch (err) {
+    release();
+    throw err;
+  }
+
+  // ไม่ await — ให้ webhook ตอบ LINE ได้ทันที; error ทุกกรณีถูกจัดการใน runAnalyze แล้ว
+  // catch ตรงนี้เป็นแค่ตาข่ายสุดท้ายกัน unhandled rejection
+  runAnalyze(data, userId)
+    .catch((err) => {
+      logger.error(`handleAnalyze: unexpected error userId=${userId} data="${data.slice(0, 80)}"`, err);
+    })
+    .finally(release);
+}
+
+async function runAnalyze(data, userId) {
+  // data = "analyze:{type}:{name}:{ip}" — name อาจมี ":" จึงตัด segment แรก/สุดท้ายออก
+  const parts = data.split(':');
+  const type  = parts[1] || '';
+  const rawIp = parts.length > 3 ? parts[parts.length - 1] : '-';
+  const name  = parts.slice(2, parts.length > 3 ? -1 : undefined).join(':') || '-';
+  const ip    = rawIp && rawIp !== '-' && rawIp !== 'N/A' ? rawIp : null;
+
+  let analysis;
+  try {
     const ctx = await gatherAnalyzeContext(type, name, ip);
 
     const prompt = `คุณเป็น Network Engineer วิเคราะห์ปัญหาของ ${name} (${type})${ip ? ` IP ${ip}` : ''}
@@ -373,9 +412,21 @@ AP ที่เกี่ยวข้อง: ${ctx.apContext}
 ถ้าหลายอุปกรณ์มีปัญหาพร้อมกัน ให้ระบุว่าน่าจะเป็นปัญหาระดับ network/switch`;
 
     // 800 tokens — วิเคราะห์รายอุปกรณ์มี context 2 layer คำตอบยาวกว่า chat ปกติ (500)
-    const analysis = await ai.chat(prompt, null, 800);
-    return reply(replyToken, fmt.buildAiResponse(analysis));
-  });
+    analysis = await ai.chat(prompt, null, 800);
+  } catch (err) {
+    // AI ล้มเหลว (ai.js throw หลัง retry ครบ) → แจ้ง user โดยไม่หัก quota (เหมือน withAI เดิม)
+    logger.warn(`runAnalyze: AI ล้มเหลว ไม่หัก quota (userId=${userId} type=${type}): ${err.message}`);
+    await push(userId, fmt.buildError('AI ไม่ว่างในขณะนี้ กรุณาลองใหม่ในอีกสักครู่ (ไม่นับโควต้า)'), [],
+      `runAnalyze error notice (userId=${userId} type=${type})`);
+    return;
+  }
+
+  auth.incrementAIUsage(userId);
+  const sent = await push(userId, fmt.buildAiResponse(analysis), [], `runAnalyze result (userId=${userId} type=${type})`);
+  if (!sent) {
+    // วิเคราะห์สำเร็จ (นับ quota แล้ว) แต่ส่งผลไม่ถึงผู้ใช้ — log ให้ชัดเพื่อ debug
+    logger.error(`runAnalyze: push ผลวิเคราะห์ไม่สำเร็จ userId=${userId} type=${type} name="${name}"`);
+  }
 }
 
 // เทียบ /24 subnet เดียวกัน เช่น 192.168.1.10 กับ 192.168.1.99
@@ -1271,6 +1322,34 @@ async function reply(replyToken, flexContents, extraQR = []) {
         });
       } catch (err3) {
         logger.error('reply: text fallback ก็ล้มเหลว (replyToken อาจหมดอายุ)', err3);
+      }
+    }
+  }
+}
+
+// ── Push ไปยัง LINE (ไม่ใช้ replyToken จึงไม่หมดอายุ) ─────────────────────────
+// ใช้ส่งผลที่ตามมาทีหลังจาก reply แรก (เช่น ผลวิเคราะห์ AI ที่ช้า) — คืน true ถ้าส่งถึง LINE สำเร็จ
+// label ใช้ระบุบริบทใน log เท่านั้น (ห้ามใส่ secret)
+async function push(userId, flexContents, extraQR = [], label = 'push') {
+  const flexMsg = { type: 'flex', altText: ALT_TEXT, contents: flexContents };
+  try {
+    await lineClient.pushMessage({ to: userId, messages: [{ ...flexMsg, quickReply: fmt.quickReply(extraQR) }] });
+    return true;
+  } catch (err) {
+    logger.warn(`push: ล้มเหลวครั้งแรก [${label}] (${err.message}) — retrying without quickReply`);
+    if (err.body) logger.warn(`push: LINE error body=${err.body}`);
+    try {
+      await lineClient.pushMessage({ to: userId, messages: [flexMsg] });
+      return true;
+    } catch (err2) {
+      logger.error(`push: ล้มเหลวทั้ง 2 ครั้ง [${label}] — ส่ง text fallback`, err2);
+      if (err2.body) logger.error(`push: LINE error body=${err2.body}`);
+      try {
+        await lineClient.pushMessage({ to: userId, messages: [{ type: 'text', text: 'ขออภัย เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง' }] });
+        return true;
+      } catch (err3) {
+        logger.error(`push: text fallback ก็ล้มเหลว [${label}]`, err3);
+        return false;
       }
     }
   }
