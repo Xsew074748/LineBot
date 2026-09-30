@@ -1,0 +1,168 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# หมวด 3: Host/Server ทรัพยากรเกิน (CPU / RAM / Disk) — ข้อมูลรูปแบบ Zabbix trigger
+# 5 เคส: HOST-01 … HOST-05
+#
+# หมายเหตุสำคัญ: prompt จริงของบอท (analyzeAlert) มีฟิลด์ข้อความอิสระเดียวคือ comments
+# เคสในหมวดนี้ใส่ "Operational data" (ค่าที่วัดได้ ณ ขณะเกิดเหตุ) ไว้ใน comments — ซึ่งเป็นข้อมูลที่
+# Zabbix แสดงได้จริง (opdata ของ trigger) แต่ปัจจุบันบอทยังไม่ได้ส่งค่าเหล่านี้ให้ AI
+# ต้องระบุข้อจำกัดนี้ในเล่มรายงานว่าเป็นการทดลองที่ให้ข้อมูลละเอียดกว่าบอทปัจจุบัน
+# ═══════════════════════════════════════════════════════════════════════════════
+
+- id: HOST-01
+  title: "CPU สูงต่อเนื่องจากโปรเซส java ตัวเดียว"
+  category: host_resource
+  prompt_kind: alert
+  input:
+    description: "High CPU utilization (over 90% for 5m)"
+    host: "SRV-APP-01"
+    priorityLabel: "สูง"
+    lastChange: "15/10/2569 14:31:05"
+    comments: "Operational data: CPU util 97.8%, load average 18.2 (4 คอร์); top process: java (PID 2210) ใช้ CPU 94%; เพิ่งมีการ deploy แอปเวอร์ชันใหม่ 14:20"
+  ground_truth:
+    root_cause: "โปรเซส java (PID 2210) ของแอปพลิเคชันกิน CPU ผิดปกติ (โหลด 18.2 บน 4 คอร์) หลังการ deploy เวอร์ชันใหม่เมื่อ 14:20 น่าจะเป็นบั๊กหรือ loop/ค้างในแอปเวอร์ชันใหม่ ไม่ใช่ปัญหาฮาร์ดแวร์หรือเครือข่าย"
+    partial_root_cause: "ระบุว่าเป็นโปรเซส/แอปพลิเคชันที่กิน CPU แต่ไม่เชื่อมกับการ deploy ใหม่ หรือระบุกว้างๆ ว่าโหลดสูง"
+    wrong_root_cause_examples:
+      - "สรุปว่าฮาร์ดแวร์/CPU เสีย"
+      - "สรุปว่าเครือข่ายมีปัญหา"
+    key_evidence:
+      - "java PID 2210 ใช้ CPU 94%"
+      - "load 18.2 บน 4 คอร์"
+      - "deploy เวอร์ชันใหม่ 14:20 ก่อนเกิดเหตุ ~11 นาที"
+    severity: high
+    severity_rationale: "บริการแอปพลิเคชันช้า/เสี่ยงล่ม กระทบผู้ใช้งานระบบนี้ แต่ยังไม่ล่มสมบูรณ์"
+    correct_actions:
+      - "ยืนยันโปรเซสที่กินทรัพยากร (top) และดู thread dump/log ของแอป"
+      - "พิจารณา rollback เวอร์ชันที่เพิ่ง deploy"
+      - "restart บริการเมื่อจำเป็นเพื่อคืนบริการ แล้วสืบสาเหตุต่อ"
+      - "ตรวจสอบก่อนขยายทรัพยากร"
+    unacceptable_actions:
+      - "แนะนำเปลี่ยนฮาร์ดแวร์"
+      - "แก้ไขที่เครือข่าย"
+  design_note: "มีเบาะแสชัด (โปรเซส + การ deploy) — ทดสอบว่า AI เชื่อมเหตุการณ์เวลาเข้ากับสาเหตุ"
+
+- id: HOST-02
+  title: "หน่วยความจำ DB หมด OOM-killer ทำงาน"
+  category: host_resource
+  prompt_kind: alert
+  input:
+    description: "Lack of available memory (<10% of total)"
+    host: "SRV-DB-01"
+    priorityLabel: "วิกฤต"
+    lastChange: "15/10/2569 15:02:40"
+    comments: "Operational data: หน่วยความจำว่าง 2.1% (RAM 32 GB), swap ใช้ 96%; mysqld ใช้ RSS 28 GB; OOM-killer ทำงาน 2 ครั้งใน 1 ชั่วโมง; จำนวน connection ปัจจุบัน 1,850 (ปกติ ~300)"
+  ground_truth:
+    root_cause: "mysqld ใช้หน่วยความจำเกือบทั้งเครื่อง (28/32 GB) จนใช้ swap 96% และ OOM-killer ทำงาน โดยมี connection พุ่งเป็น 1,850 (ปกติ ~300) — น่าจะมี connection/query ล้นหรือรั่ว ทำให้ DB เสี่ยงล่มหรือข้อมูลเสียหาย"
+    partial_root_cause: "ระบุว่า mysqld/DB กินหน่วยความจำ แต่ไม่เชื่อมกับ connection ที่พุ่งผิดปกติ"
+    wrong_root_cause_examples:
+      - "สรุปว่าต้องเปลี่ยน/เพิ่ม RAM อย่างเดียวโดยไม่ตรวจ connection/query"
+      - "สรุปว่าปัญหาที่เครือข่าย"
+    key_evidence:
+      - "RAM ว่าง 2.1%, swap 96%"
+      - "mysqld RSS 28 GB"
+      - "OOM-killer ทำงาน 2 ครั้ง"
+      - "connection 1,850 เทียบปกติ ~300"
+    severity: critical
+    severity_rationale: "ฐานข้อมูลหลักมีความเสี่ยงล่มทันทีหรือข้อมูลเสียหายจาก OOM — กระทบทุกระบบที่พึ่งพา DB นี้"
+    correct_actions:
+      - "ตรวจ connection/query ที่ผิดปกติ (processlist) และจำกัดหรือยุติต้นตอ"
+      - "ตรวจ config หน่วยความจำ (buffer pool ฯลฯ) ให้เหมาะกับเครื่อง"
+      - "เตรียมสำรองข้อมูล/failover ก่อนตัดสินใจ restart"
+      - "วางแผนเพิ่ม RAM/แยกโหลดในระยะถัดไป"
+    unacceptable_actions:
+      - "kill -9 mysqld ทันทีโดยไม่เตรียมสำรอง"
+      - "ล้าง cache/รีบูตเป็นวิธีเดียว โดยไม่สืบสาเหตุ connection"
+  design_note: "ความรุนแรงสูงสุด และมีคำแนะนำที่อันตรายได้ (kill ทันที) — ทดสอบความปลอดภัยของคำแนะนำ"
+
+- id: HOST-03
+  title: "Log nginx โตเร็ว ดิสก์ /var/log เหลือ 3.8% เต็มใน ~1.4 ชั่วโมง"
+  category: host_resource
+  prompt_kind: alert
+  input:
+    description: "Free disk space is less than 10% on volume /var/log"
+    host: "SRV-WEB-02"
+    priorityLabel: "สูง"
+    lastChange: "15/10/2569 16:12:00"
+    comments: "Operational data: พื้นที่ว่าง 4.2 GB (3.8%); โตขึ้น ~3 GB/ชั่วโมง ใน 6 ชั่วโมงล่าสุด; ไฟล์ใหญ่สุด /var/log/nginx/access.log 61 GB; ไม่มีการ logrotate ตั้งแต่ 05/10/2569; จำนวน request ต่อนาทีสูงกว่าปกติ 8 เท่า"
+  ground_truth:
+    root_cause: "access.log ของ nginx โตผิดปกติ (61 GB) เพราะ logrotate ไม่ทำงานตั้งแต่ 05/10 ร่วมกับ traffic พุ่ง 8 เท่า (อาจเป็น traffic ผิดปกติ/บอต/โจมตี) — ด้วยอัตรา ~3 GB/ชม. พื้นที่ 4.2 GB จะเต็มในราว 1.4 ชั่วโมง"
+    partial_root_cause: "ระบุ access.log/ไม่มี logrotate เป็นสาเหตุ แต่ไม่พูดถึง traffic ที่สูงผิดปกติ หรือไม่ระบุกรอบเวลาที่จะเต็ม"
+    wrong_root_cause_examples:
+      - "สรุปว่าฮาร์ดแวร์ดิสก์เสีย"
+      - "สรุปว่าไฟล์อื่นในระบบเป็นสาเหตุ"
+    key_evidence:
+      - "access.log 61 GB"
+      - "ไม่มี logrotate ตั้งแต่ 05/10"
+      - "อัตราโต ~3 GB/ชม. เหลือ 4.2 GB"
+      - "request ต่อนาทีสูงกว่าปกติ 8 เท่า"
+    severity: high
+    severity_rationale: "ใกล้เต็มภายในไม่ถึง 2 ชั่วโมง เสี่ยงทำให้เว็บและ log หยุดทำงาน แต่ยังไม่เต็มและกู้ได้ด้วยการ rotate ทันที"
+    correct_actions:
+      - "หมุน (rotate)/บีบอัด/ย้ายไฟล์ log ใหญ่ออกอย่างระมัดระวังเพื่อคืนพื้นที่ทันที"
+      - "แก้ logrotate ให้ทำงานอีกครั้งและตั้งเพดานขนาดไฟล์"
+      - "ตรวจ traffic ผิดปกติว่าเป็นบอต/โจมตีหรือไม่ และพิจารณาจำกัด/บล็อก"
+      - "ตั้งการแจ้งเตือนเมื่อพื้นที่ต่ำกว่าเกณฑ์เร็วขึ้น"
+    unacceptable_actions:
+      - "ลบไฟล์ในระบบแบบสุ่มหรือลบทั้งโฟลเดอร์"
+      - "ไม่ระบุความเร่งด่วนด้านเวลา"
+  design_note: "ต้องคำนวณเวลาที่จะเต็มจากตัวเลขในข้อมูล — ทดสอบการคิดเชิงปริมาณและคำแนะนำที่ปลอดภัย"
+
+- id: HOST-04
+  title: "ดิสก์ว่าง 18% โตช้า (แจ้งเตือนเชิงวางแผน)"
+  category: host_resource
+  prompt_kind: alert
+  input:
+    description: "Free disk space is less than 20% on volume /data"
+    host: "SRV-FILE-02"
+    priorityLabel: "คำเตือน"
+    lastChange: "15/10/2569 09:00:00"
+    comments: "Operational data: พื้นที่ว่าง 18% (720 GB จาก 4 TB); โตขึ้น ~0.4% ต่อสัปดาห์ (ตามค่าเฉลี่ย 12 สัปดาห์); คาดว่าเต็มภายในประมาณ 45 สัปดาห์; ไม่มี error หรือผลกระทบต่อผู้ใช้"
+  ground_truth:
+    root_cause: "พื้นที่ดิสก์ลดลงตามการใช้งานปกติอย่างช้าๆ (0.4%/สัปดาห์) ยังเหลือเวลาเต็มที่ราว 45 สัปดาห์ ไม่ใช่เหตุขัดข้อง เป็นเรื่องการวางแผนความจุ"
+    partial_root_cause: "ระบุว่าไม่เร่งด่วน แต่แนะนำให้ล้างข้อมูลหรือเพิ่มพื้นที่ทันทีเกินความจำเป็น"
+    wrong_root_cause_examples:
+      - "จัดเป็นวิกฤต/ต้องแก้ทันที"
+      - "สรุปว่ามี log หรือไฟล์ผิดปกติโตเร็ว (ไม่มีหลักฐาน)"
+    key_evidence:
+      - "โต ~0.4%/สัปดาห์"
+      - "คาดว่าเต็มใน ~45 สัปดาห์"
+      - "ไม่มีผลกระทบต่อผู้ใช้"
+    severity: low
+    severity_rationale: "ไม่มีผลกระทบปัจจุบันและมีเวลาเหลือมาก"
+    correct_actions:
+      - "บรรจุเข้าแผนเพิ่มความจุ/ตรวจสอบข้อมูลที่ไม่จำเป็นในรอบบำรุงรักษา"
+      - "ปรับเกณฑ์เตือนหรือเฝ้าดูแนวโน้ม"
+    unacceptable_actions:
+      - "แนะนำแก้ไขฉุกเฉิน/ปิดระบบเพื่อเพิ่มดิสก์"
+  design_note: "เหยื่อสำหรับ AI ที่ตอบเกินจริง (over-alarm) — ป้ายกำกับ trigger เป็น 'คำเตือน' อยู่แล้ว"
+
+- id: HOST-05
+  title: "ดิสก์เสื่อม RAID5 degraded ไม่มี hot spare"
+  category: host_resource
+  prompt_kind: alert
+  input:
+    description: "High I/O wait time (over 30% for 10m)"
+    host: "SRV-FILE-01"
+    priorityLabel: "สูง"
+    lastChange: "15/10/2569 13:48:22"
+    comments: "Operational data: iowait 47%; ดิสก์ sdb: SMART Reallocated_Sector_Ct = 1284 (สัปดาห์ก่อน 96), Current_Pending_Sector = 37; RAID5 (4 ดิสก์) สถานะ degraded — sdb ถูกตัดออกจาก array เมื่อ 20 นาทีก่อน; ไม่มี hot spare"
+  ground_truth:
+    root_cause: "ดิสก์ sdb เสื่อมสภาพ/ล้มเหลว (sector เสียเพิ่มขึ้นเร็ว) ถูกตัดออกจาก RAID5 ทำให้ array อยู่ในสถานะ degraded ไม่มีความซ้ำซ้อน — iowait สูงเป็นผลจากดิสก์เสียและการทำงานแบบ degraded ไม่ใช่ปัญหาโหลดทั่วไป"
+    partial_root_cause: "ระบุว่าดิสก์ sdb มีปัญหา แต่ไม่เน้นว่า RAID degraded ไม่มีความซ้ำซ้อนและเสี่ยงข้อมูลสูญหาย"
+    wrong_root_cause_examples:
+      - "สรุปว่าเป็นเรื่องโหลด/แอปพลิเคชัน/เครือข่าย"
+      - "ไม่พูดถึงดิสก์หรือความเสี่ยงต่อข้อมูล"
+    key_evidence:
+      - "SMART Reallocated_Sector_Ct 1284 (เพิ่มจาก 96), Pending 37"
+      - "RAID5 degraded, sdb ถูกตัดออก"
+      - "ไม่มี hot spare"
+    severity: critical
+    severity_rationale: "RAID5 ที่ degraded หากดิสก์อีกลูกเสียข้อมูลจะสูญหายทั้งหมด และไม่มี spare — มีความเสี่ยงต่อข้อมูลระดับสูงสุด"
+    correct_actions:
+      - "ตรวจสอบและยืนยันว่ามีการสำรองข้อมูลล่าสุดที่ใช้ได้ทันที"
+      - "จัดหาและเปลี่ยนดิสก์ sdb โดยเร็ว และตรวจสุขภาพดิสก์ที่เหลือใน array"
+      - "ระวังโหลดขณะ rebuild และวางแผนเวลาให้เหมาะสม"
+      - "พิจารณาเพิ่ม hot spare"
+    unacceptable_actions:
+      - "แนะนำแก้เรื่องโหลดหรือเครือข่ายโดยไม่พูดถึงดิสก์"
+      - "สั่ง rebuild/รีบูตทันทีโดยไม่ยืนยันการสำรองข้อมูล"
+  design_note: "trigger ตั้งไว้ที่ 'สูง' แต่ความจริงเสี่ยงระดับ critical — ทดสอบว่า AI ประเมินความรุนแรงจริงจากข้อมูล ไม่ใช่ตามป้ายกำกับ"

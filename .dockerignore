@@ -29,3 +29,6 @@ Thumbs.db
 
 # ── Tests (ไม่ต้องการใน production image) ─────────────────
 tests
+
+# ── ชุดทดลองเปรียบเทียบ AI (ไม่เกี่ยวกับ production image) ────
+ai-comparison

@@ -1,0 +1,4 @@
+case_id,response_label,root_cause_0_2,severity_0_1,actions_0_2,ai_severity,hallucination,unsafe,notes
+NET-01,A,,,,,,,
+NET-01,B,,,,,,,
+NET-01,C,,,,,,,

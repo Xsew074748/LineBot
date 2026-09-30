@@ -1,0 +1,219 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# หมวด 5: ปัญหาลูกโซ่ (หลายอุปกรณ์มีปัญหาพร้อมกัน แต่ต้นตอเป็นจุดเดียว)
+# 6 เคส: CAS-01 … CAS-06
+#
+# สิ่งที่วัด: AI ระบุ "ต้นตอ" ถูกไหม ไม่ใช่แค่ไล่รายงานทีละอุปกรณ์
+# ฟิลด์ input.group ของ prompt_kind: correlation มีโครงสร้างเดียวกับผลลัพธ์ของ services/correlate.js
+#   (startTimeText = ข้อความเวลาที่ toLocaleString('th-TH') ให้ในบอทจริง)
+# กฎ confidence ตาม correlate.js: หลายชนิดอุปกรณ์ → high · มี switch/host → high · ชนิดเดียวไม่มี infra → medium
+# ═══════════════════════════════════════════════════════════════════════════════
+
+- id: CAS-01
+  title: "Switch ชั้น 2 ล่ม พากล้อง 5 ตัว + AP 2 ตัวหลุดพร้อมกัน (switch อยู่ในรายการ)"
+  category: cascade
+  prompt_kind: correlation
+  input:
+    group:
+      zone: "ชั้น 2"
+      startTimeText: "15/10/2569 09:12:03"
+      types: [switch, camera, ap]
+      confidence: high
+      hasInfraDevice: true
+      devices:
+        - {device: "SW-FL2-01", type: switch, source: zabbix}
+        - {device: "HQ-CAM-201", type: camera, source: hikcentral}
+        - {device: "HQ-CAM-202", type: camera, source: hikcentral}
+        - {device: "HQ-CAM-203", type: camera, source: hikcentral}
+        - {device: "HQ-CAM-204", type: camera, source: hikcentral}
+        - {device: "HQ-CAM-205", type: camera, source: hikcentral}
+        - {device: "AP-FL2-01", type: ap, source: omada}
+        - {device: "AP-FL2-02", type: ap, source: omada}
+  ground_truth:
+    root_cause: "SW-FL2-01 (switch ชั้น 2) ขัดข้อง (ไฟเลี้ยง/ฮาร์ดแวร์/uplink) และอุปกรณ์ปลายทางอีก 7 ตัว (กล้อง 5 + AP 2) ที่ต่อผ่านมันหลุดตามเป็นลูกโซ่ — ต้นตอเป็นจุดเดียว ไม่ใช่ 8 ปัญหาแยกกัน"
+    partial_root_cause: "ระบุว่ามีจุดร่วมของโครงสร้างในโซนชั้น 2 (สอดคล้องกับ switch) แต่ไม่ชี้ SW-FL2-01 ตรงๆ หรือเสนอให้ไล่ตรวจอุปกรณ์ปลายทางร่วมด้วยเป็นหลัก"
+    wrong_root_cause_examples:
+      - "รายงานเป็นปัญหา 8 อย่างแยกกัน"
+      - "ชี้ว่ากล้องหรือ AP เป็นต้นตอ"
+      - "แต่งชื่ออุปกรณ์ที่ไม่มีในข้อมูล"
+    key_evidence:
+      - "SW-FL2-01 (switch) อยู่ในกลุ่มเดียวกับอุปกรณ์ที่ต่อผ่านมัน"
+      - "หลายชนิดอุปกรณ์ในโซนเดียวกัน เริ่มเวลาเดียวกัน"
+    severity: high
+    severity_rationale: "ทั้งชั้น 2 สูญเสียทั้ง WiFi และการเฝ้าระวังด้วยกล้องพร้อมกัน แต่ไม่ใช่ทั้งองค์กร"
+    correct_actions:
+      - "ตรวจ SW-FL2-01 ก่อน (ไฟเลี้ยง พัดลม สถานะ uplink)"
+      - "ตรวจสาย uplink ไปยัง switch แกนกลาง"
+      - "เมื่อ switch กลับมา ยืนยันว่ากล้อง/AP กลับมาเอง"
+    unacceptable_actions:
+      - "ไล่แก้กล้องหรือ AP ทีละตัวก่อนตรวจ switch"
+  design_note: "เคสลูกโซ่มาตรฐานที่มีต้นตอในรายการ — ระดับเริ่มต้น"
+
+- id: CAS-02
+  title: "กล้อง 4 + AP 2 ชั้น 3 ดับพร้อมกัน แต่ switch ไม่อยู่ในรายการ (ไม่ได้ monitor)"
+  category: cascade
+  prompt_kind: correlation
+  input:
+    group:
+      zone: "ชั้น 3"
+      startTimeText: "15/10/2569 13:26:40"
+      types: [camera, ap]
+      confidence: high
+      hasInfraDevice: false
+      devices:
+        - {device: "HQ-CAM-301", type: camera, source: hikcentral}
+        - {device: "HQ-CAM-302", type: camera, source: hikcentral}
+        - {device: "HQ-CAM-303", type: camera, source: hikcentral}
+        - {device: "HQ-CAM-304", type: camera, source: hikcentral}
+        - {device: "AP-FL3-01", type: ap, source: omada}
+        - {device: "AP-FL3-02", type: ap, source: omada}
+  ground_truth:
+    root_cause: "จุดร่วมด้านโครงสร้างของชั้น 3 ที่ทั้งกล้องและ AP ใช้ร่วมกัน (เช่น switch/แหล่ง PoE/uplink/ไฟเลี้ยงร่วมของชั้นนั้น) — ข้อมูลไม่มี switch อยู่ในรายการ จึงระบุอุปกรณ์เฉพาะตัวไม่ได้และควรบอกตรงๆ ว่าต้องตรวจเพิ่ม"
+    partial_root_cause: "ชี้ว่าน่าจะมีจุดร่วมของชั้น 3 แต่ฟันธงหรือเดาชื่ออุปกรณ์ที่ไม่มีในข้อมูล (เช่น สมมติว่าเป็น SW-FL3-01) โดยไม่บอกว่าไม่แน่ใจ"
+    wrong_root_cause_examples:
+      - "สรุปว่าอุปกรณ์ 6 ตัวเสียแยกกันโดยบังเอิญ"
+      - "ระบุชื่อ switch ที่ไม่มีในข้อมูลเป็นข้อเท็จจริง"
+    key_evidence:
+      - "อุปกรณ์ 2 ชนิด (กล้อง+AP) ต่างระบบ เริ่มเวลาเดียวกันในโซนเดียวกัน"
+      - "ไม่มี switch/host ในกลุ่ม"
+    severity: high
+    severity_rationale: "ทั้งชั้นสูญเสียทั้ง WiFi และกล้อง"
+    correct_actions:
+      - "ตรวจ switch/แหล่ง PoE/uplink/ไฟเลี้ยงที่ให้บริการชั้น 3 (แม้ไม่อยู่ในระบบเฝ้าระวัง)"
+      - "เพิ่ม switch นี้เข้าระบบ monitoring เพื่อให้เห็นต้นตอได้ชัดขึ้น"
+    unacceptable_actions:
+      - "ไล่แก้กล้อง/AP ทีละตัว"
+  design_note: "ทดสอบ hallucination: prompt ตอบว่า 'ห้ามสมมติอุปกรณ์ที่ไม่มีในข้อมูล' (CORRELATION_SYSTEM_PROMPT) — AI ที่ตั้งชื่อ switch เองต้องถูกหักคะแนน"
+
+- id: CAS-03
+  title: "อาคาร B: server 2 + กล้อง 4 + AP 3 หายพร้อมกัน (ไฟหรือ uplink ทั้งอาคาร)"
+  category: cascade
+  prompt_kind: correlation
+  input:
+    group:
+      zone: "อาคาร B"
+      startTimeText: "16/10/2569 04:41:12"
+      types: [host, camera, ap]
+      confidence: high
+      hasInfraDevice: true
+      devices:
+        - {device: "SRV-B-01", type: host, source: zabbix}
+        - {device: "SRV-B-02", type: host, source: zabbix}
+        - {device: "B-CAM-01", type: camera, source: hikcentral}
+        - {device: "B-CAM-02", type: camera, source: hikcentral}
+        - {device: "B-CAM-03", type: camera, source: hikcentral}
+        - {device: "B-CAM-04", type: camera, source: hikcentral}
+        - {device: "AP-B-01", type: ap, source: omada}
+        - {device: "AP-B-02", type: ap, source: omada}
+        - {device: "AP-B-03", type: ap, source: omada}
+  ground_truth:
+    root_cause: "จุดร่วมระดับอาคาร B — ไฟฟ้า/UPS/เบรกเกอร์ของอาคาร หรือลิงก์หลักที่เชื่อมอาคารกับส่วนอื่น — เพราะอุปกรณ์ 3 ระบบรวมถึง server 2 เครื่องที่มีแหล่งไฟของตัวเองหายพร้อมกันในโซนเดียวกัน ควรตรวจไฟก่อนแล้วจึงตรวจลิงก์"
+    partial_root_cause: "ชี้ว่าเป็นปัญหาโครงสร้างร่วมของอาคาร B แต่ไม่ระบุเรื่องไฟ/uplink หรือไม่จัดลำดับความสำคัญ"
+    wrong_root_cause_examples:
+      - "สรุปว่าอุปกรณ์แต่ละตัวเสียแยกกัน"
+      - "สรุปว่าเป็นปัญหา WiFi/AP เป็นหลัก"
+    key_evidence:
+      - "มี host (server) 2 เครื่องอยู่ในกลุ่ม → hasInfraDevice = true"
+      - "3 ชนิดอุปกรณ์ 9 ตัวในอาคารเดียวกัน เริ่มเวลา 04:41 น. พร้อมกัน"
+    severity: critical
+    severity_rationale: "ทั้งอาคารสูญเสียทุกบริการรวม server — อาจเป็นไฟดับ/ความเสี่ยงต่อข้อมูลและความปลอดภัย"
+    correct_actions:
+      - "ตรวจไฟฟ้า/UPS/เบรกเกอร์ที่อาคาร B ก่อน"
+      - "ตรวจลิงก์เชื่อมอาคาร (fiber/switch หลักอาคาร)"
+      - "ประสานช่างไฟและตรวจว่า server ปิดตัวอย่างปลอดภัยหรือไม่ เมื่อไฟกลับมา"
+    unacceptable_actions:
+      - "ไล่แก้ทีละอุปกรณ์"
+  design_note: "ความรุนแรงสูงสุดของกลุ่ม correlation — ทดสอบการจัดลำดับสมมติฐาน (ไฟก่อน) และ severity = critical"
+
+- id: CAS-04
+  title: "NVR ล่ม → กล้อง 16 ตัวใน subnet เดียวกันออฟไลน์ตาม"
+  category: cascade
+  prompt_kind: analyze_device
+  input:
+    type: host
+    name: "SRV-NVR-01"
+    ip: "192.168.30.5"
+    status: "🔴 ออฟไลน์"
+    apContext: "ไม่พบ AP ที่เกี่ยวข้อง"
+    cameraContext: "subnet เดียวกัน: PLANT-CAM-101 (192.168.30.101) ออฟไลน์, PLANT-CAM-102 (192.168.30.102) ออฟไลน์, PLANT-CAM-103 (192.168.30.103) ออฟไลน์, PLANT-CAM-104 (192.168.30.104) ออฟไลน์, PLANT-CAM-105 (192.168.30.105) ออฟไลน์, PLANT-CAM-106 (192.168.30.106) ออฟไลน์, PLANT-CAM-107 (192.168.30.107) ออฟไลน์, PLANT-CAM-108 (192.168.30.108) ออฟไลน์ … และอีก 8 | ออฟไลน์ทั้งหมด 16 ตัว: PLANT-CAM-101 (192.168.30.101) ออฟไลน์, PLANT-CAM-102 (192.168.30.102) ออฟไลน์, PLANT-CAM-103 (192.168.30.103) ออฟไลน์, PLANT-CAM-104 (192.168.30.104) ออฟไลน์, PLANT-CAM-105 (192.168.30.105) ออฟไลน์, PLANT-CAM-106 (192.168.30.106) ออฟไลน์ … และอีก 10"
+  ground_truth:
+    root_cause: "เครื่อง NVR/เซิร์ฟเวอร์บันทึกภาพ SRV-NVR-01 ล่ม (ไฟ/ระบบปฏิบัติการ/ดิสก์/เครือข่ายของเครื่อง) ทำให้กล้อง 16 ตัวใน subnet เดียวกัน (192.168.30.x) ที่พึ่งพามันขาดการเชื่อมต่อ/ไม่ถูกบันทึก — ต้นตอคือเครื่อง NVR ไม่ใช่กล้องเป็นรายตัว"
+    partial_root_cause: "ระบุว่ามีจุดร่วมเดียวของกล้องทั้งกลุ่ม แต่ไม่ชี้ว่าเป็นเครื่อง NVR ที่ออฟไลน์"
+    wrong_root_cause_examples:
+      - "สรุปว่ากล้อง 16 ตัวเสียแยกกัน"
+      - "สรุปว่าเป็นปัญหา AP/WiFi"
+    key_evidence:
+      - "host SRV-NVR-01 ออฟไลน์ และอยู่ใน subnet เดียวกับกล้อง"
+      - "กล้องออฟไลน์ทั้งหมด 16 ตัว เป็นเลขต่อเนื่อง"
+    severity: critical
+    severity_rationale: "ไม่มีการบันทึกภาพทั้งไซต์ (16 กล้อง) ขณะที่เครื่องบันทึกล่ม ช่องว่างของหลักฐานภาพเป็นความเสี่ยงต่อความปลอดภัยในระดับสูงสุด"
+    correct_actions:
+      - "ตรวจเครื่อง SRV-NVR-01 (ไฟ บูต ดิสก์ เครือข่าย) และกู้บริการบันทึกโดยด่วน"
+      - "ตรวจว่ากล้องมีที่เก็บภาพชั่วคราว (SD card) หรือไม่ เพื่อกู้ช่วงที่ขาด"
+      - "หามาตรการเฝ้าระวังชั่วคราวระหว่างซ่อม"
+    unacceptable_actions:
+      - "ตรวจ/รีสตาร์ทกล้องทีละตัวเป็นหลัก"
+  design_note: "ลูกโซ่ข้ามระบบ (Zabbix host → กล้อง HikCentral) ในรูปแบบข้อความจริงของ gatherAnalyzeContext"
+
+- id: CAS-05
+  title: "ทุกระบบล่มกว้าง (hosts 2/13, กล้อง 4/32) — จุดร่วมระดับแกนกลาง"
+  category: cascade
+  prompt_kind: context_text
+  input:
+    topic: summary
+    context: "Zabbix: 11 alerts, 2/13 hosts online. กล้อง: 4/32 online. WiFi: 8 APs, 3 clients"
+  ground_truth:
+    root_cause: "อุปกรณ์เกือบทุกระบบ (host 11 จาก 13, กล้อง 28 จาก 32, WiFi client เหลือ 3) หายพร้อมกัน — เป็นสัญญาณของจุดร่วมระดับแกนกลาง เช่น core switch/ไฟฟ้าหรือ UPS ห้องเครือข่าย/uplink หลัก มากกว่าปัญหาแยกกัน 3 ระบบ (ข้อมูลไม่พอระบุอุปกรณ์เฉพาะตัว จึงควรบอกว่าต้องตรวจเพิ่ม)"
+    partial_root_cause: "ระบุว่าเป็นปัญหากว้างที่น่าจะมีจุดร่วม แต่ไม่ชี้ไปที่แกนกลาง/ไฟ หรือไล่คำแนะนำแยกรายระบบ"
+    wrong_root_cause_examples:
+      - "สรุปว่า Zabbix, HikCentral, Omada เสียแยกกัน 3 เรื่อง"
+      - "ระบุอุปกรณ์เฉพาะตัวที่ไม่มีในข้อมูลเป็นข้อเท็จจริง"
+    key_evidence:
+      - "hosts online 2/13"
+      - "กล้อง online 4/32"
+      - "WiFi client เหลือ 3 (ตัวเลขต่ำผิดปกติ)"
+    severity: critical
+    severity_rationale: "เกือบทั้งองค์กรสูญเสียบริการ IT/การเฝ้าระวังพร้อมกัน"
+    correct_actions:
+      - "ประกาศเป็นเหตุใหญ่ (incident) และเริ่มตรวจที่ห้องเครือข่าย/แกนกลางก่อน (ไฟ, core switch, uplink หลัก)"
+      - "ตรวจว่า monitoring เองยังเห็นข้อมูลจริงหรือไม่ (จุดร่วมอาจอยู่ที่ตัวเก็บข้อมูล)"
+      - "แจ้งผู้เกี่ยวข้องและวางลำดับการกู้คืน"
+    unacceptable_actions:
+      - "แก้ทีละระบบตามลำดับโดยไม่มองจุดร่วม"
+  design_note: "รูปแบบ summaryCtxText จริง ข้อมูลน้อยมาก — ทดสอบการอนุมานจากสัดส่วนและการยอมรับข้อจำกัดของข้อมูล"
+
+- id: CAS-06
+  title: "กล้อง 6 ตัวโซนเดียวกันหลุดพร้อมกัน แต่มีชนิดเดียว ไม่มี infra (confidence = medium)"
+  category: cascade
+  prompt_kind: correlation
+  input:
+    group:
+      zone: "ลานจอดรถชั่วคราว"
+      startTimeText: "16/10/2569 17:05:31"
+      types: [camera]
+      confidence: medium
+      hasInfraDevice: false
+      devices:
+        - {device: "PLANT-CAM-061", type: camera, source: hikcentral}
+        - {device: "PLANT-CAM-062", type: camera, source: hikcentral}
+        - {device: "PLANT-CAM-063", type: camera, source: hikcentral}
+        - {device: "PLANT-CAM-064", type: camera, source: hikcentral}
+        - {device: "PLANT-CAM-065", type: camera, source: hikcentral}
+        - {device: "PLANT-CAM-066", type: camera, source: hikcentral}
+  ground_truth:
+    root_cause: "กล้อง 6 ตัวโซนเดียวกันหลุดพร้อมกัน มีแนวโน้มจุดร่วมเดียว (switch/แหล่ง PoE/ไฟ/สายหลักของโซน) แต่ข้อมูลมีเพียงอุปกรณ์ชนิดเดียวและไม่มีอุปกรณ์โครงสร้าง (ระบบให้ความมั่นใจระดับ medium) จึงควรตอบด้วยภาษาที่ไม่ฟันธง ('น่าจะ/อาจจะ') และแนะนำตรวจจุดร่วมก่อน"
+    partial_root_cause: "ชี้ว่าน่าจะมีจุดร่วมแต่ฟันธงเกินข้อมูล หรือไม่บอกระดับความไม่แน่ใจ"
+    wrong_root_cause_examples:
+      - "สรุปว่ากล้อง 6 ตัวเสียแยกกันโดยบังเอิญ"
+      - "ฟันธงชื่อ switch/อุปกรณ์ที่ไม่มีในข้อมูล"
+    key_evidence:
+      - "ชนิดอุปกรณ์เดียว (camera) 6 ตัว เวลาเดียวกัน โซนเดียวกัน"
+      - "ความมั่นใจของระบบ medium และไม่มี infra ในกลุ่ม"
+    severity: medium
+    severity_rationale: "โซนลานจอดรถชั่วคราวความสำคัญรองจากพื้นที่หลัก แต่กล้อง 6 ตัวเป็นจุดบอดชุดใหญ่จึงไม่ควรเป็น low"
+    correct_actions:
+      - "ตรวจ switch/แหล่ง PoE/ไฟเลี้ยงที่ให้บริการโซนนี้"
+      - "ตรวจสายหลัก/ตู้ควบคุมกลางแจ้ง"
+      - "ยืนยันกับหน้างานว่ามีเหตุไฟ/งานซ่อมในพื้นที่หรือไม่"
+    unacceptable_actions:
+      - "สรุปแน่นอนโดยไม่ยอมรับความไม่แน่ใจ"
+  design_note: "ทดสอบ calibration (การบอกระดับความมั่นใจ) ตามกฎเหล็กข้อ 2-3 ของ CORRELATION_SYSTEM_PROMPT"

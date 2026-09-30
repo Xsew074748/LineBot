@@ -1,0 +1,124 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# หมวด 7: ข้อมูลขัดแย้งกันระหว่างระบบ (Zabbix / HikCentral / Omada)
+# 4 เคส: CON-01 … CON-04
+#
+# สิ่งที่วัด: AI ต้องจับความขัดแย้ง อธิบายว่าทำไมสองระบบจึงเห็นต่างกัน และระบุปัญหาจริงอยู่ชั้นไหน
+# ═══════════════════════════════════════════════════════════════════════════════
+
+- id: CON-01
+  title: "Zabbix เห็น NVR ออนไลน์ แต่ HikCentral เห็นกล้องใต้ NVR ออฟไลน์ทั้ง 8 ตัว"
+  category: conflict
+  prompt_kind: analyze_device
+  input:
+    type: host
+    name: "SRV-NVR-02"
+    ip: "192.168.40.5"
+    status: "🟢 ออนไลน์"
+    apContext: "ไม่พบ AP ที่เกี่ยวข้อง"
+    cameraContext: "subnet เดียวกัน: PLANT-CAM-111 (192.168.40.111) ออฟไลน์, PLANT-CAM-112 (192.168.40.112) ออฟไลน์, PLANT-CAM-113 (192.168.40.113) ออฟไลน์, PLANT-CAM-114 (192.168.40.114) ออฟไลน์, PLANT-CAM-115 (192.168.40.115) ออฟไลน์, PLANT-CAM-116 (192.168.40.116) ออฟไลน์, PLANT-CAM-117 (192.168.40.117) ออฟไลน์, PLANT-CAM-118 (192.168.40.118) ออฟไลน์ | ออฟไลน์ทั้งหมด 8 ตัว: PLANT-CAM-111 (192.168.40.111) ออฟไลน์, PLANT-CAM-112 (192.168.40.112) ออฟไลน์, PLANT-CAM-113 (192.168.40.113) ออฟไลน์, PLANT-CAM-114 (192.168.40.114) ออฟไลน์, PLANT-CAM-115 (192.168.40.115) ออฟไลน์, PLANT-CAM-116 (192.168.40.116) ออฟไลน์ … และอีก 2"
+  ground_truth:
+    root_cause: "เครื่อง NVR ตอบ (ออนไลน์ในระดับเครือข่าย/OS) แต่กล้องทั้งกลุ่มออฟไลน์ใน HikCentral แปลว่าเครือข่ายถึงเครื่องได้ ปัญหาจึงน่าจะอยู่ที่บริการ/โปรเซสของ NVR หรือการเชื่อมต่อระหว่าง HikCentral–NVR–กล้อง (บริการค้าง/หยุด, credential/เวลาไม่ตรง, พอร์ต/ไฟร์วอลล์, license) ไม่ใช่การที่เครื่องหรือเครือข่ายล่ม"
+    partial_root_cause: "จับความขัดแย้งได้ว่า host ออนไลน์แต่กล้องออฟไลน์ แต่สรุปกว้างๆ ว่าเป็นปัญหาเครือข่ายหรือ NVR โดยไม่แยกชั้นบริการ"
+    wrong_root_cause_examples:
+      - "สรุปว่าเครื่อง NVR ดับ/ไฟตก"
+      - "ให้ตรวจกล้องทีละตัวเป็นหลัก"
+      - "ไม่สังเกตว่าสองระบบให้ข้อมูลขัดกัน"
+    key_evidence:
+      - "สถานะ host ออนไลน์ (Zabbix)"
+      - "กล้องใน subnet เดียวกัน ออฟไลน์ทั้ง 8 ตัว (HikCentral)"
+    severity: high
+    severity_rationale: "กล้องทั้ง 8 ตัวของ NVR นี้ไม่ถูกดู/บันทึกผ่านระบบ ทั้งที่เครื่องดูเหมือนปกติ อาจไม่ถูกสังเกตนาน"
+    correct_actions:
+      - "ตรวจบริการ/โปรเซสของ NVR (ค้างหรือหยุด) และรีสตาร์ทบริการที่เกี่ยวข้อง"
+      - "ตรวจการเชื่อมต่อ HikCentral↔NVR (พอร์ต ไฟร์วอลล์ credential เวลา license)"
+      - "ยืนยันว่ามีการบันทึกที่ NVR จริงหรือไม่"
+    unacceptable_actions:
+      - "เปลี่ยนกล้องหรือตรวจสายกล้องเป็นขั้นแรก"
+  design_note: "การอนุมานชั้นบริการจากข้อมูลที่ขัดกัน — ตรงกับรูปแบบข้อความจริงของ gatherAnalyzeContext (host)"
+
+- id: CON-02
+  title: "Zabbix ICMP บอกเว็บเซิร์ฟเวอร์ล่ม แต่ agent/HTTP ปกติ (firewall เพิ่งเปลี่ยน)"
+  category: conflict
+  prompt_kind: alert
+  input:
+    description: "Unavailable by ICMP ping"
+    host: "SRV-WEB-03"
+    priorityLabel: "สูง"
+    lastChange: "16/10/2569 15:10:00"
+    comments: "Zabbix Agent (active) ยังส่งข้อมูลล่าสุดเมื่อ 20 วินาทีก่อน; ตรวจเว็บจาก external monitor ตอบ HTTP 200 ปกติ; มีการเปลี่ยน firewall rule ของ VLAN เซิร์ฟเวอร์เมื่อ 15:05 (CHG-2305)"
+  ground_truth:
+    root_cause: "เซิร์ฟเวอร์ทำงานปกติ (agent ยังส่งข้อมูล และเว็บตอบ HTTP 200) ที่ ICMP ล้มเหลวเกิดจาก firewall rule ใหม่ (CHG-2305 เมื่อ 15:05) ที่น่าจะบล็อก ICMP จาก Zabbix — เป็นความขัดแย้งของ check ประเภท ICMP ไม่ใช่เหตุที่เครื่องล่ม"
+    partial_root_cause: "จับได้ว่า agent/HTTP ปกติจึงไม่น่าเป็นเครื่องล่ม แต่ไม่เชื่อมกับ firewall rule ที่เพิ่งเปลี่ยน"
+    wrong_root_cause_examples:
+      - "สรุปว่าเซิร์ฟเวอร์ล่มและต้องกู้ระบบ"
+    key_evidence:
+      - "Zabbix Agent ส่งข้อมูลเมื่อ 20 วินาทีก่อน"
+      - "external monitor: HTTP 200"
+      - "เปลี่ยน firewall rule 15:05 ก่อนเกิดเหตุ 5 นาที"
+    severity: low
+    severity_rationale: "บริการปกติ เป็นเพียง check เดียวที่ผิดพลาดจากการตั้งค่า"
+    correct_actions:
+      - "ตรวจ/ปรับ firewall rule ให้อนุญาต ICMP จากเซิร์ฟเวอร์ Zabbix"
+      - "ทบทวน change CHG-2305 และยืนยันผลกระทบต่อ check อื่น"
+    unacceptable_actions:
+      - "รีบูตหรือกู้เซิร์ฟเวอร์ที่ปกติอยู่"
+  design_note: "ป้ายกำกับ 'สูง' เป็นเหยื่อ — หลักฐานหลายแหล่งขัดกับ check เดียว"
+
+- id: CON-03
+  title: "Omada เห็น AP ออนไลน์ (uplink ไร้สาย) แต่ Zabbix เห็นพอร์ตสายแลนของ AP นั้น down"
+  category: conflict
+  prompt_kind: alert
+  input:
+    description: "Interface Gi0/7 (AP-Floor1-02): Link down"
+    host: "SW-FL1-01"
+    priorityLabel: "ปานกลาง"
+    lastChange: "16/10/2569 09:40:15"
+    comments: "Omada รายงาน AP-Floor1-02 ยังออนไลน์ (uplink: Wireless, RSSI -71 dBm, ความเร็ว 65 Mbps) ขณะที่ Zabbix รายงานพอร์ต Gi0/7 ที่ต่อสาย AP นี้ down มา 25 นาที; มี client บน AP นี้ 18 เครื่อง แจ้งว่าช้า"
+  ground_truth:
+    root_cause: "สายแลน/พอร์ต Gi0/7 ที่ต่อ AP ขาดหรือมีปัญหา ทำให้ AP ตกไปใช้ uplink ไร้สาย (mesh) แบบสำรอง (RSSI -71 dBm, 65 Mbps) จึงยังออนไลน์ใน Omada แต่ช้าลง — สองระบบไม่ขัดกันจริง เพียงมองคนละชั้น"
+    partial_root_cause: "ระบุว่าสายแลนของ AP มีปัญหาหรืออธิบาย fallback แต่ไม่เชื่อมกับอาการช้าของผู้ใช้"
+    wrong_root_cause_examples:
+      - "สรุปว่า AP เสีย/ต้องเปลี่ยน AP"
+      - "สรุปว่า switch ทั้งตัวมีปัญหา"
+    key_evidence:
+      - "Omada: uplink Wireless RSSI -71 dBm, 65 Mbps"
+      - "Zabbix: Gi0/7 down 25 นาที"
+      - "client 18 เครื่องแจ้งช้า"
+    severity: medium
+    severity_rationale: "บริการยังใช้ได้แต่คุณภาพลดลงสำหรับผู้ใช้ 18 คน ไม่ถึงขั้นขาด"
+    correct_actions:
+      - "ตรวจสายแลนและพอร์ต Gi0/7 (ทดสอบสาย/ย้ายพอร์ต/ตรวจ PoE)"
+      - "หลังซ่อมสาย ยืนยันว่า AP กลับมาใช้ uplink สายแลน"
+      - "แจ้งผู้ใช้ว่าความเร็วลดลงชั่วคราว"
+    unacceptable_actions:
+      - "เปลี่ยน AP ก่อนตรวจสาย/พอร์ต"
+  design_note: "ความขัดแย้งที่อธิบายได้ด้วยกลไก fallback — ทดสอบการอธิบายเหตุผลของความต่างระหว่างระบบ"
+
+- id: CON-04
+  title: "HikCentral เห็นกล้องออนไลน์ แต่ Zabbix เห็น packet loss 62% (เฉพาะกล้องตัวเดียว)"
+  category: conflict
+  prompt_kind: alert
+  input:
+    description: "High ICMP loss (>40% for 5m)"
+    host: "HQ-CAM-030"
+    priorityLabel: "ปานกลาง"
+    lastChange: "16/10/2569 11:25:00"
+    comments: "HikCentral รายงานสถานะออนไลน์ แต่ frame rate ตก 25→3 fps; ping loss 62% RTT เฉลี่ย 380 ms; กล้องอื่น 5 ตัวบน SW-FL1-02 เดียวกันปกติ (loss 0%)"
+  ground_truth:
+    root_cause: "ปัญหาเฉพาะลิงก์ของกล้อง HQ-CAM-030 (สายแลนเสื่อม/พอร์ต/duplex mismatch/การ์ดเครือข่ายของกล้อง) เพราะกล้องตัวอื่น 5 ตัวบน switch เดียวกันปกติ จึงไม่ใช่ switch ทั้งตัว — 'ออนไลน์' ใน HikCentral ไม่ได้แปลว่าคุณภาพลิงก์ดี"
+    partial_root_cause: "ระบุว่าเป็นปัญหาลิงก์ของกล้องตัวนี้ แต่ไม่ใช้หลักฐานว่ากล้องอื่นบน switch เดียวกันปกติ หรือระบุสาเหตุกว้างๆ ว่า 'เครือข่ายไม่เสถียร'"
+    wrong_root_cause_examples:
+      - "สรุปว่า switch SW-FL1-02 มีปัญหา"
+      - "สรุปว่ากล้องปกติเพราะ HikCentral เห็นออนไลน์"
+    key_evidence:
+      - "ping loss 62%, RTT 380 ms, frame rate 25→3 fps"
+      - "กล้องอื่น 5 ตัวบน switch เดียวกัน loss 0%"
+    severity: medium
+    severity_rationale: "กล้อง 1 ตัวภาพแย่ลงมาก (ใช้งานจริงยาก) แต่ไม่ใช่ขัดข้องทั้งระบบ"
+    correct_actions:
+      - "ตรวจสายแลน/หัว RJ45 และพอร์ตที่ต่อกล้อง"
+      - "ตรวจ duplex/ความเร็วของพอร์ตและ error counters"
+      - "ลองย้ายพอร์ตหรือเปลี่ยนสายเพื่อแยกสาเหตุ"
+    unacceptable_actions:
+      - "เปลี่ยนหรือรีสตาร์ท switch ทั้งตัว"
+  design_note: "สถานะ 'ออนไลน์' ขัดกับคุณภาพจริง — ทดสอบการไม่เชื่อสถานะไบนารีอย่างเดียว"
