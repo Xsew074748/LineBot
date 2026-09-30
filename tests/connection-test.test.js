@@ -106,7 +106,7 @@ describe('testAiProvider', () => {
   test.each([['claude', claude], ['gemini', gemini], ['openai', openai]])('%s สำเร็จ', async (n, mod) => {
     const spy = jest.spyOn(mod, 'complete').mockResolvedValue('ok');
     expect(await ct.testAiProvider(n, 'k')).toEqual({ ok: true, message: 'เชื่อมต่อสำเร็จ' });
-    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ apiKey: 'k', maxTokens: 10, maxAttempts: 1 }));
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ apiKey: 'k', maxTokens: 64, maxAttempts: 1 }));
   });
   test.each([['claude', claude], ['gemini', gemini], ['openai', openai]])('%s 401/404/timeout', async (n, mod) => {
     const scenarios = [
@@ -123,6 +123,24 @@ describe('testAiProvider', () => {
   });
   test('ไม่รู้จัก provider', async () => {
     expect((await ct.testAiProvider('foo', 'k')).ok).toBe(false);
+  });
+
+  test('gemini: finishReason MAX_TOKENS (thinking กิน token หมด) → ข้อความไทยเฉพาะ ไม่ตกไป fallback', async () => {
+    jest.spyOn(gemini, 'complete').mockRejectedValueOnce(
+      new Error('Gemini API: ไม่มีคำตอบใน response (finishReason: MAX_TOKENS, model gemini-3.8-flash)')
+    );
+    const r = await ct.testAiProvider('gemini', 'k');
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/เชื่อมต่อสำเร็จ แต่โมเดลตอบไม่ทัน/);
+  });
+
+  test('ไม่มีคำตอบใน response (finishReason อื่นที่ไม่ใช่ MAX_TOKENS) → ข้อความไทยเฉพาะ ไม่ตกไป fallback', async () => {
+    jest.spyOn(gemini, 'complete').mockRejectedValueOnce(
+      new Error('Gemini API: ไม่มีคำตอบใน response (finishReason: SAFETY, model gemini-3.8-flash)')
+    );
+    const r = await ct.testAiProvider('gemini', 'k');
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/เชื่อมต่อกับ API สำเร็จ แต่ไม่ได้คำตอบกลับมา/);
   });
 });
 

@@ -54,6 +54,8 @@ function describeError(err, { credLabel = 'ข้อมูลรับรอง'
   if (/HikCentral API error/i.test(raw)) return 'HikCentral ปฏิเสธคำขอ ตรวจสอบ App Key และ App Secret';
   if (/Zabbix API Error/i.test(raw))     return 'Zabbix ปฏิเสธคำขอ ตรวจสอบ URL และ API Token';
   if (/Unexpected token|JSON|<html/i.test(raw)) return 'เซิร์ฟเวอร์ตอบกลับรูปแบบที่ไม่ถูกต้อง ตรวจสอบ URL';
+  if (/finishReason: MAX_TOKENS/i.test(raw)) return 'เชื่อมต่อสำเร็จ แต่โมเดลตอบไม่ทัน token ที่กำหนด (ลองใหม่อีกครั้ง หรือรายงานผู้ดูแลระบบถ้าเกิดซ้ำ)';
+  if (/ไม่มีคำตอบใน response/i.test(raw)) return 'เชื่อมต่อกับ API สำเร็จ แต่ไม่ได้คำตอบกลับมา (อาจเป็นปัญหาชั่วคราวของผู้ให้บริการ)';
   return 'เชื่อมต่อไม่สำเร็จ ตรวจสอบค่าที่กรอก';
 }
 
@@ -126,7 +128,9 @@ async function testAiProvider(providerName, apiKey) {
   const key = str(apiKey);
   if (!key) return fail('กรุณากรอก API Key');
   return run(() => withTimeout(
-    provider.complete({ systemPrompt: 'ตอบคำเดียว', userPrompt: 'test', maxTokens: 10, apiKey: key, maxAttempts: 1 }),
+    // maxTokens 10 เดิมเล็กเกินไปสำหรับ thinking model บางตัว (Gemini) ที่กิน token ไปกับ reasoning
+    // ก่อนตอบจริง จนไม่เหลือคำตอบเลย — เพิ่มเป็น 64 ให้มีที่เหลือพอ
+    provider.complete({ systemPrompt: 'ตอบคำเดียว', userPrompt: 'test', maxTokens: 64, apiKey: key, maxAttempts: 1 }),
     AI_TIMEOUT_MS
   ), { credLabel: 'API Key' });
 }

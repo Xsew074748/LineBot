@@ -96,13 +96,15 @@ describe('ai-providers/gemini — parse response ตาม shape จริงข
     expect(global.fetch).toHaveBeenCalledTimes(1);
 
     const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toContain('generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent');
+    // อ้างชื่อรุ่นจาก export ของโมดูลเอง ไม่ hardcode ซ้ำ — กัน test พังทุกครั้งที่เปลี่ยนรุ่นตาม Google
+    expect(url).toContain(`generativelanguage.googleapis.com/v1beta/models/${geminiProvider.MODEL}:generateContent`);
     expect(url).toContain('key=gm-test');
 
     const body = JSON.parse(opts.body);
     expect(body.systemInstruction).toEqual({ parts: [{ text: 'sys' }] });
     expect(body.contents).toEqual([{ role: 'user', parts: [{ text: 'user' }] }]);
-    expect(body.generationConfig).toEqual({ maxOutputTokens: 100 });
+    // thinkingConfig: ปิด reasoning ไม่ให้กิน maxOutputTokens (ดูคอมเมนต์ใน gemini.js)
+    expect(body.generationConfig).toEqual({ maxOutputTokens: 100, thinkingConfig: { thinkingBudget: 0 } });
   });
 
   test('retry 1 ครั้งเมื่อ attempt แรก fail แล้วสำเร็จ attempt 2', async () => {
@@ -129,8 +131,18 @@ describe('ai-providers/gemini — parse response ตาม shape จริงข
   test('throw เมื่อ response ไม่มี candidates/text (shape ผิดคาด)', async () => {
     process.env.GEMINI_API_KEY = 'gm-test';
     global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ candidates: [] }) });
-    await expect(geminiProvider.complete({ systemPrompt: 's', userPrompt: 'u' })).rejects.toThrow();
+    await expect(geminiProvider.complete({ systemPrompt: 's', userPrompt: 'u' })).rejects.toThrow(/finishReason: unknown/);
     expect(global.fetch).toHaveBeenCalledTimes(2); // retry ด้วยเพราะถือเป็นความล้มเหลวเหมือนกัน
+  });
+
+  test('throw พร้อมระบุ finishReason: MAX_TOKENS เมื่อ thinking กิน token จนไม่เหลือคำตอบ', async () => {
+    process.env.GEMINI_API_KEY = 'gm-test';
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ candidates: [{ content: { parts: [] }, finishReason: 'MAX_TOKENS' }] }),
+    });
+    await expect(geminiProvider.complete({ systemPrompt: 's', userPrompt: 'u', maxTokens: 10 }))
+      .rejects.toThrow(/finishReason: MAX_TOKENS/);
   });
 });
 
