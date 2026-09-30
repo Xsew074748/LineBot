@@ -1,0 +1,12 @@
+# ═══ NET-02: Gateway ขอบเครือข่ายล่ม LAN ภายในยังปกติ
+# เส้นทางในบอท: ctx_wifi
+# หมายเหตุการจำลอง: AP 6, Switch 2, Gateway 1; gateway ดับเครื่องเดียวโดยไม่มีอุปกรณ์ลูก (ไม่ cascade)
+name: "NET-02 — Gateway ขอบเครือข่ายล่ม LAN ภายในยังปกติ"
+description: "AP 6, Switch 2, Gateway 1; gateway ดับเครื่องเดียวโดยไม่มีอุปกรณ์ลูก (ไม่ cascade)"
+devices:
+  - {name: "SW-CORE-01", kind: "switch", ip: "192.168.1.2"}
+  - {name: "SW-FL1-01", kind: "switch", ip: "192.168.10.2", depends_on: "SW-CORE-01"}
+  - {name: "GW-EDGE-01", kind: "gateway", ip: "192.168.1.1", status: "down", down_since: "-3m"}
+generate:
+  - {kind: "ap", name: "AP-FL1-0{i}", from: 1, to: 3, ip: "192.168.10.1{i}", depends_on: "SW-FL1-01", clients: 8}
+  - {kind: "ap", name: "AP-FL2-0{i}", from: 1, to: 3, ip: "192.168.20.1{i}", depends_on: "SW-CORE-01", clients: 8}

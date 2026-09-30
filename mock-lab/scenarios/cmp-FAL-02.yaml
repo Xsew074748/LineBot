@@ -1,0 +1,9 @@
+# ═══ FAL-02: CPU สูงเพราะงาน backup รายคืน (baseline เดิมทุกคืน)
+# เส้นทางในบอท: alert {"host":"SRV-BACKUP-01","descriptionIncludes":"CPU"}
+# หมายเหตุการจำลอง: metrics cpu 93 จริง; baseline 30 วันอยู่ใน comments (mock ไม่เก็บประวัติ)
+name: "FAL-02 — CPU สูงเพราะงาน backup รายคืน (baseline เดิมทุกคืน)"
+description: "metrics cpu 93 จริง; baseline 30 วันอยู่ใน comments (mock ไม่เก็บประวัติ)"
+devices:
+  - {name: "SRV-BACKUP-01", kind: "host", ip: "192.168.1.50", groups: ["Servers"], metrics: {"cpu":93,"memory_used":45,"disk_used":70}}
+alerts:
+  - {host: "SRV-BACKUP-01", description: "High CPU utilization (over 90% for 5m)", priority: 4, since: "2026-10-16T01:37:20+07:00", comments: "งาน backup รายคืนรันช่วง 01:00-03:30 ทำให้ CPU 90-100% ทุกคืน (baseline 30 วันย้อนหลังเหมือนกันทุกคืน); คืนนี้ CPU เฉลี่ย 93%; ไม่มีบริการอื่นบนเครื่องนี้"}

@@ -1,0 +1,10 @@
+# ═══ FLAP-01: ลิงก์ไฟเบอร์ uplink สะดุด 17 ครั้ง/30 นาที (CRC สูง แสงอ่อน)
+# เส้นทางในบอท: alert {"host":"SW-FL2-01","descriptionIncludes":"Gi0/24"}
+# หมายเหตุการจำลอง: ประวัติ flapping/CRC/แสงอยู่ใน comments (mock ไม่มี SNMP counters) — ไม่ใช้ flap แบบเวลาจริงเพราะทำให้ผลไม่คงที่ระหว่างการรัน
+name: "FLAP-01 — ลิงก์ไฟเบอร์ uplink สะดุด 17 ครั้ง/30 นาที (CRC สูง แสงอ่อน)"
+description: "ประวัติ flapping/CRC/แสงอยู่ใน comments (mock ไม่มี SNMP counters) — ไม่ใช้ flap แบบเวลาจริงเพราะทำให้ผลไม่คงที่ระหว่างการรัน"
+devices:
+  - {name: "SW-CORE-01", kind: "switch", ip: "192.168.1.2", zabbix: {"groups":["Network"]}}
+  - {name: "SW-FL2-01", kind: "switch", ip: "192.168.20.2", zabbix: {"groups":["Network"]}, depends_on: "SW-CORE-01"}
+alerts:
+  - {host: "SW-FL2-01", description: "Interface Gi0/24 (uplink to SW-CORE-01): Link down", priority: 4, since: "2026-10-15T11:05:42+07:00", comments: "ลิงก์ down/up 17 ครั้งใน 30 นาที (แต่ละครั้ง down 5-20 วินาที); CRC errors เพิ่ม 4,210 ในช่วงเดียวกัน; SFP RX power -19.8 dBm (ค่าปกติของ SFP นี้ -3 ถึง -14 dBm); ใช้ไฟเบอร์ multimode ระยะ ~180 ม."}

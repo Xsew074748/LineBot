@@ -1,0 +1,9 @@
+# ═══ HOST-03: Log nginx โตเร็ว ดิสก์ /var/log เหลือ 3.8% เต็มใน ~1.4 ชั่วโมง
+# เส้นทางในบอท: alert {"host":"SRV-WEB-02","descriptionIncludes":"Free disk space"}
+# หมายเหตุการจำลอง: metrics disk_used 96.2 (ว่าง 3.8%) ตรงกับ comments; อัตราโต/ไฟล์ใหญ่สุด/request ต้องพึ่ง comments
+name: "HOST-03 — Log nginx โตเร็ว ดิสก์ /var/log เหลือ 3.8% เต็มใน ~1.4 ชั่วโมง"
+description: "metrics disk_used 96.2 (ว่าง 3.8%) ตรงกับ comments; อัตราโต/ไฟล์ใหญ่สุด/request ต้องพึ่ง comments"
+devices:
+  - {name: "SRV-WEB-02", kind: "host", ip: "192.168.1.14", groups: ["Servers"], metrics: {"cpu":55,"memory_used":58,"disk_used":96.2}}
+alerts:
+  - {host: "SRV-WEB-02", description: "Free disk space is less than 10% on volume /var/log", priority: 4, since: "2026-10-15T16:12:00+07:00", comments: "Operational data: พื้นที่ว่าง 4.2 GB (3.8%); โตขึ้น ~3 GB/ชั่วโมง ใน 6 ชั่วโมงล่าสุด; ไฟล์ใหญ่สุด /var/log/nginx/access.log 61 GB; ไม่มีการ logrotate ตั้งแต่ 05/10/2569; จำนวน request ต่อนาทีสูงกว่าปกติ 8 เท่า"}

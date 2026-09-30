@@ -1,0 +1,9 @@
+# ═══ HOST-04: ดิสก์ว่าง 18% โตช้า (แจ้งเตือนเชิงวางแผน)
+# เส้นทางในบอท: alert {"host":"SRV-FILE-02","descriptionIncludes":"Free disk space"}
+# หมายเหตุการจำลอง: metrics disk_used 82 (ต่ำกว่าเกณฑ์ auto trigger 90) — alert เตือนล่วงหน้ามาจาก alert ที่กำหนดเอง
+name: "HOST-04 — ดิสก์ว่าง 18% โตช้า (แจ้งเตือนเชิงวางแผน)"
+description: "metrics disk_used 82 (ต่ำกว่าเกณฑ์ auto trigger 90) — alert เตือนล่วงหน้ามาจาก alert ที่กำหนดเอง"
+devices:
+  - {name: "SRV-FILE-02", kind: "host", ip: "192.168.1.31", groups: ["Servers"], metrics: {"cpu":12,"memory_used":40,"disk_used":82}}
+alerts:
+  - {host: "SRV-FILE-02", description: "Free disk space is less than 20% on volume /data", priority: 2, since: "2026-10-15T09:00:00+07:00", comments: "Operational data: พื้นที่ว่าง 18% (720 GB จาก 4 TB); โตขึ้น ~0.4% ต่อสัปดาห์ (ตามค่าเฉลี่ย 12 สัปดาห์); คาดว่าเต็มภายในประมาณ 45 สัปดาห์; ไม่มี error หรือผลกระทบต่อผู้ใช้"}

@@ -1,0 +1,9 @@
+# ═══ HOST-02: หน่วยความจำ DB หมด OOM-killer ทำงาน
+# เส้นทางในบอท: alert {"host":"SRV-DB-01","descriptionIncludes":"memory"}
+# หมายเหตุการจำลอง: metrics memory_used 97.9 (ว่าง 2.1%) ตรงกับ comments; รายละเอียด swap/RSS/connection ต้องพึ่ง comments
+name: "HOST-02 — หน่วยความจำ DB หมด OOM-killer ทำงาน"
+description: "metrics memory_used 97.9 (ว่าง 2.1%) ตรงกับ comments; รายละเอียด swap/RSS/connection ต้องพึ่ง comments"
+devices:
+  - {name: "SRV-DB-01", kind: "host", ip: "192.168.1.12", groups: ["Servers"], metrics: {"cpu":76,"memory_used":97.9,"disk_used":57}}
+alerts:
+  - {host: "SRV-DB-01", description: "Lack of available memory (<10% of total)", priority: 5, since: "2026-10-15T15:02:40+07:00", comments: "Operational data: หน่วยความจำว่าง 2.1% (RAM 32 GB), swap ใช้ 96%; mysqld ใช้ RSS 28 GB; OOM-killer ทำงาน 2 ครั้งใน 1 ชั่วโมง; จำนวน connection ปัจจุบัน 1,850 (ปกติ ~300)"}

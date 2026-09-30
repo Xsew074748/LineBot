@@ -1,0 +1,11 @@
+# ═══ FLAP-02: AP สลับ Connected/Disconnected 9 ครั้ง/ชม. (PoE เกือบเต็มขีดจำกัด)
+# เส้นทางในบอท: alert {"host":"AP-Meeting-03","descriptionIncludes":"สลับสถานะ"}
+# หมายเหตุการจำลอง: ค่า PoE/ความยาวสายอยู่ใน comments
+name: "FLAP-02 — AP สลับ Connected/Disconnected 9 ครั้ง/ชม. (PoE เกือบเต็มขีดจำกัด)"
+description: "ค่า PoE/ความยาวสายอยู่ใน comments"
+devices:
+  - {name: "SW-FL3-01", kind: "switch", ip: "192.168.30.2", zabbix: {"groups":["Network"]}}
+  - {name: "AP-Meeting-03", kind: "ap", ip: "192.168.30.13", depends_on: "SW-FL3-01", zabbix: {"groups":["Network"]}, clients: 11}
+  - {name: "AP-Meeting-01", kind: "ap", ip: "192.168.30.11", depends_on: "SW-FL3-01", clients: 9}
+alerts:
+  - {host: "AP-Meeting-03", description: "Omada: AP-Meeting-03 สลับสถานะ Connected/Disconnected", priority: 3, since: "2026-10-15T10:15:30+07:00", comments: "เปลี่ยนสถานะ 9 ครั้งใน 1 ชั่วโมง; ต่อ PoE จาก SW-FL3-01 พอร์ต 12 จ่ายไฟ 29.6 W (ขีดจำกัดพอร์ต 30 W); เมื่อวานเพิ่งเปิดใช้งาน 2 radio เต็มกำลัง; สายแลนยาว ~85 ม.; switch ตัวอื่นและ AP อื่นบน switch เดียวกันปกติ"}

@@ -1,0 +1,12 @@
+# ═══ CAS-01: Switch ชั้น 2 ล่ม พากล้อง 5 ตัว + AP 2 ตัวหลุดพร้อมกัน (switch อยู่ในรายการ)
+# เส้นทางในบอท: cross
+# หมายเหตุการจำลอง: บอทจัดกลุ่มตามชื่อ: Zabbix ใช้ extractZone(ชื่อ) ส่วนกล้อง HikCentral ใช้ชื่อพื้นที่ (location) → ตั้งชื่อให้ zone ตรงกัน (FL2-A); down_since ใน 5 นาทีและห่างกันไม่เกิน 120 วินาที ตามเงื่อนไขของ correlate()
+name: "CAS-01 — Switch ชั้น 2 ล่ม พากล้อง 5 ตัว + AP 2 ตัวหลุดพร้อมกัน (switch อยู่ในรายการ)"
+description: "บอทจัดกลุ่มตามชื่อ: Zabbix ใช้ extractZone(ชื่อ) ส่วนกล้อง HikCentral ใช้ชื่อพื้นที่ (location) → ตั้งชื่อให้ zone ตรงกัน (FL2-A); down_since ใน 5 นาทีและห่างกันไม่เกิน 120 วินาที ตามเงื่อนไขของ correlate()"
+devices:
+  - {name: "FL2-A-SW01", kind: "switch", ip: "192.168.20.2", status: "down", down_since: "-100s", zabbix: {"groups":["Network"]}}
+  - {name: "FL1-A-SW01", kind: "switch", ip: "192.168.10.2", zabbix: {"groups":["Network"]}}
+  - {name: "SRV-APP-01", kind: "host", ip: "192.168.1.11", groups: ["Servers"]}
+generate:
+  - {kind: "ap", name: "FL2-A-AP-0{i}", from: 1, to: 2, ip: "192.168.20.1{i}", depends_on: "FL2-A-SW01", zabbix: {"groups":["Network"]}}
+  - {kind: "camera", name: "FL2-A-CAM{n}", from: 201, to: 205, ip: "192.168.20.{n}", location: "FL2-A", depends_on: "FL2-A-SW01"}

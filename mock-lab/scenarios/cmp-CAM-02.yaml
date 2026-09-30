@@ -1,0 +1,10 @@
+# ═══ CAM-02: กล้องภายนอกภาพดำหลังฝนตก (ยัง ping ได้)
+# เส้นทางในบอท: alert {"host":"HQ-CAM-007","descriptionIncludes":"Video signal lost"}
+# หมายเหตุการจำลอง: กล้องปกติทั้งใน Zabbix และ HikCentral (สถานะ up) — อาการภาพดำอยู่ใน comments ของ trigger
+name: "CAM-02 — กล้องภายนอกภาพดำหลังฝนตก (ยัง ping ได้)"
+description: "กล้องปกติทั้งใน Zabbix และ HikCentral (สถานะ up) — อาการภาพดำอยู่ใน comments ของ trigger"
+devices:
+  - {name: "SW-OUT-01", kind: "switch", ip: "192.168.60.2"}
+  - {name: "HQ-CAM-007", kind: "camera", ip: "192.168.60.7", location: "ลานจอดรถ", depends_on: "SW-OUT-01", zabbix: true}
+alerts:
+  - {host: "HQ-CAM-007", description: "HQ-CAM-007: Video signal lost (ภาพดำ)", priority: 3, since: "2026-10-15T10:42:30+07:00", comments: "อุปกรณ์ยังตอบ ping ได้และ HikCentral รายงานสถานะออนไลน์ แต่ stream ไม่มีภาพ (video loss ช่อง 1) เกิดหลังฝนตกหนักเมื่อคืน กล้องติดตั้งภายนอกอาคาร"}

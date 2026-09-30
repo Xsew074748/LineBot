@@ -1,0 +1,12 @@
+# ═══ CAS-03: อาคาร B: server 2 + กล้อง 4 + AP 3 หายพร้อมกัน (ไฟหรือ uplink ทั้งอาคาร)
+# เส้นทางในบอท: cross
+# หมายเหตุการจำลอง: จุดร่วมของอาคาร B จำลองเป็นอุปกรณ์แม่ B-1-UPLINK (ไม่อยู่ใน Zabbix) ที่ดับ — เจตนาเฉลยคือ "ไฟหรือลิงก์หลักของอาคาร" ซึ่งข้อมูลแยกสองกรณีนี้ไม่ได้
+name: "CAS-03 — อาคาร B: server 2 + กล้อง 4 + AP 3 หายพร้อมกัน (ไฟหรือ uplink ทั้งอาคาร)"
+description: "จุดร่วมของอาคาร B จำลองเป็นอุปกรณ์แม่ B-1-UPLINK (ไม่อยู่ใน Zabbix) ที่ดับ — เจตนาเฉลยคือ \"ไฟหรือลิงก์หลักของอาคาร\" ซึ่งข้อมูลแยกสองกรณีนี้ไม่ได้"
+devices:
+  - {name: "B-1-UPLINK", kind: "gateway", ip: "192.168.90.1", status: "down", down_since: "-100s"}
+  - {name: "SRV-APP-01", kind: "host", ip: "192.168.1.11", groups: ["Servers"]}
+generate:
+  - {kind: "host", name: "B-1-SRV0{i}", from: 1, to: 2, ip: "192.168.90.1{i}", groups: ["Servers"], depends_on: "B-1-UPLINK"}
+  - {kind: "camera", name: "B-1-CAM0{i}", from: 1, to: 4, ip: "192.168.90.2{i}", location: "B-1", depends_on: "B-1-UPLINK"}
+  - {kind: "ap", name: "B-1-AP-0{i}", from: 1, to: 3, ip: "192.168.90.3{i}", depends_on: "B-1-UPLINK", zabbix: {"groups":["Network"]}}

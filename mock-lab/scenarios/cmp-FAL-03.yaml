@@ -1,0 +1,9 @@
+# ═══ FAL-03: กล้องรีบูตตามเวลา 03:00 ทุกวัน (ออฟไลน์ 2 นาที)
+# เส้นทางในบอท: alert {"host":"PLANT-CAM-044","descriptionIncludes":"ออฟไลน์"}
+# หมายเหตุการจำลอง: ประวัติรีบูตอยู่ใน comments
+name: "FAL-03 — กล้องรีบูตตามเวลา 03:00 ทุกวัน (ออฟไลน์ 2 นาที)"
+description: "ประวัติรีบูตอยู่ใน comments"
+devices:
+  - {name: "PLANT-CAM-044", kind: "camera", ip: "192.168.80.44", location: "ลานจอดรถ", zabbix: true}
+alerts:
+  - {host: "PLANT-CAM-044", description: "HikCentral: PLANT-CAM-044 ออฟไลน์", priority: 3, since: "2026-10-16T03:00:12+07:00", comments: "กล้องตั้งเวลารีบูตอัตโนมัติทุกวัน 03:00 และกลับมาออนไลน์ภายใน 3-5 นาทีทุกครั้ง (ประวัติ 14 วัน); ขณะนี้ออฟไลน์มา 2 นาที"}

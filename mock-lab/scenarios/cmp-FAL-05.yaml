@@ -1,0 +1,11 @@
+# ═══ FAL-05: เซนเซอร์อุณหภูมิห้องเซิร์ฟเวอร์อ่านค่า 78°C ครั้งเดียว (ป้ายวิกฤต)
+# เส้นทางในบอท: alert {"host":"SENSOR-SVRROOM-01","descriptionIncludes":"temperature"}
+# หมายเหตุการจำลอง: เซนเซอร์เป็น host ใน Zabbix 3 ตัว (ตัวที่ 2-3 ไม่มี alert) — ค่าอุณหภูมิอยู่ใน comments
+name: "FAL-05 — เซนเซอร์อุณหภูมิห้องเซิร์ฟเวอร์อ่านค่า 78°C ครั้งเดียว (ป้ายวิกฤต)"
+description: "เซนเซอร์เป็น host ใน Zabbix 3 ตัว (ตัวที่ 2-3 ไม่มี alert) — ค่าอุณหภูมิอยู่ใน comments"
+devices:
+  - {name: "SENSOR-SVRROOM-01", kind: "host", ip: "192.168.1.200", groups: ["Sensors"]}
+  - {name: "SENSOR-SVRROOM-02", kind: "host", ip: "192.168.1.201", groups: ["Sensors"]}
+  - {name: "SENSOR-SVRROOM-03", kind: "host", ip: "192.168.1.202", groups: ["Sensors"]}
+alerts:
+  - {host: "SENSOR-SVRROOM-01", description: "High temperature in server room (>35°C)", priority: 5, since: "2026-10-16T13:20:00+07:00", comments: "อ่านค่า 78.4°C เพียง 1 ครั้ง (1 นาที) ค่าก่อนหน้า 24.0°C และค่าถัดมา 24.1°C; เซนเซอร์อีก 2 ตัวในห้องเดียวกันอ่าน 24.1°C และ 23.8°C; เครื่องปรับอากาศทำงานปกติ; ไม่มี alert จาก UPS หรือ server ใดๆ"}

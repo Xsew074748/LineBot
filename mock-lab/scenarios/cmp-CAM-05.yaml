@@ -1,0 +1,8 @@
+# ═══ CAM-05: กล้องอาคารเก่า (ยังไม่เปิดใช้งาน) ออฟไลน์ 12 วัน
+# เส้นทางในบอท: camera_off
+# หมายเหตุการจำลอง: เส้นทางเดียวกับ CAM-04
+name: "CAM-05 — กล้องอาคารเก่า (ยังไม่เปิดใช้งาน) ออฟไลน์ 12 วัน"
+description: "เส้นทางเดียวกับ CAM-04"
+devices:
+  - {name: "PLANT-CAM-088", kind: "host", ip: "192.168.80.88", groups: ["Camera"], location: "อาคารเก่า (ยังไม่เปิดใช้งาน) ชั้น 2", status: "down", down_since: "-12d"}
+  - {name: "PLANT-CAM-001", kind: "host", ip: "192.168.80.1", groups: ["Camera"], location: "โรงงาน ชั้น 1"}

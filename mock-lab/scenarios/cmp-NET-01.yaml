@@ -1,0 +1,14 @@
+# ═══ NET-01: AP ล็อบบี้ดับเครื่องเดียว อุปกรณ์รอบข้างปกติ
+# เส้นทางในบอท: analyze_device {"type":"ap","name":"AP-Lobby-01"}
+# หมายเหตุการจำลอง: AP ตัวเดียวดับโดยไม่ผูกกับ switch (ไม่ cascade); กล้อง 3 ตัวใน subnet เดียวกันปกติ (อยู่ใน Zabbix กลุ่ม Camera เพราะบอทจับ subnet จาก IP ของ Zabbix)
+name: "NET-01 — AP ล็อบบี้ดับเครื่องเดียว อุปกรณ์รอบข้างปกติ"
+description: "AP ตัวเดียวดับโดยไม่ผูกกับ switch (ไม่ cascade); กล้อง 3 ตัวใน subnet เดียวกันปกติ (อยู่ใน Zabbix กลุ่ม Camera เพราะบอทจับ subnet จาก IP ของ Zabbix)"
+devices:
+  - {name: "GW-EDGE-01", kind: "gateway", ip: "192.168.1.1"}
+  - {name: "SW-FL1-01", kind: "switch", ip: "192.168.10.2"}
+  - {name: "AP-Lobby-01", kind: "ap", ip: "192.168.10.21", status: "down", down_since: "-30m", depends_on: "SW-FL1-01"}
+  - {name: "AP-Meeting-01", kind: "ap", ip: "192.168.10.22", depends_on: "SW-FL1-01", clients: 9}
+  - {name: "AP-Office-01", kind: "ap", ip: "192.168.20.21", clients: 14}
+  - {name: "LOBBY-CAM-01", kind: "host", ip: "192.168.10.31", groups: ["Camera"], depends_on: "SW-FL1-01"}
+  - {name: "LOBBY-CAM-02", kind: "host", ip: "192.168.10.32", groups: ["Camera"], depends_on: "SW-FL1-01"}
+  - {name: "LOBBY-CAM-03", kind: "host", ip: "192.168.10.33", groups: ["Camera"], depends_on: "SW-FL1-01"}

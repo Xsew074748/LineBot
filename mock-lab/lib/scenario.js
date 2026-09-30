@@ -40,9 +40,25 @@ function collect(file, chain = []) {
   return [...base, { file: path.basename(p), doc }];
 }
 
+// generate: สร้างอุปกรณ์ชุดใหญ่จาก template  {kind, name: "HQ-CAM-{n}", from: 101, to: 116, ip: "192.168.30.{n}", ...ฟิลด์อื่นเหมือน device}
+//   {n} = เลขตั้งแต่ from ถึง to (ทุกฟิลด์ที่เป็นข้อความ) · {i} = ลำดับเริ่มที่ 1
+function expandGenerate(spec) {
+  if (!Number.isInteger(spec.from) || !Number.isInteger(spec.to) || spec.to < spec.from) throw new Error('generate ต้องมี from/to เป็นจำนวนเต็ม (to >= from)');
+  const out = [];
+  for (let n = spec.from, i = 1; n <= spec.to; n++, i++) {
+    const dev = {};
+    for (const [k, v] of Object.entries(spec)) {
+      if (k === 'from' || k === 'to') continue;
+      dev[k] = typeof v === 'string' ? v.split('{n}').join(String(n)).split('{i}').join(String(i)) : v;
+    }
+    out.push(dev);
+  }
+  return out;
+}
+
 function applyDocs(docs, state) {
   for (const { file, doc } of docs) {
-    for (const dev of doc.devices || []) {
+    for (const dev of [...(doc.devices || []), ...(doc.generate || []).flatMap(expandGenerate)]) {
       try { state.upsert(dev); } catch (e) { throw new Error(`${file}: ${e.message}`); }
     }
     for (const p of doc.patch || []) {

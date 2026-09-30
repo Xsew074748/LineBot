@@ -1,0 +1,12 @@
+# ═══ CAM-01: กล้องดับเครื่องเดียว กล้องอื่นในไซต์ปกติ
+# เส้นทางในบอท: analyze_device {"type":"camera","name":"HQ-CAM-012"}
+# หมายเหตุการจำลอง: กล้องอยู่ใน HikCentral อย่างเดียว (บอทดึงสถานะกล้องรายตัวจาก getCamerasWithCache); กล้องอื่นปกติ; AP อยู่คนละ subnet
+name: "CAM-01 — กล้องดับเครื่องเดียว กล้องอื่นในไซต์ปกติ"
+description: "กล้องอยู่ใน HikCentral อย่างเดียว (บอทดึงสถานะกล้องรายตัวจาก getCamerasWithCache); กล้องอื่นปกติ; AP อยู่คนละ subnet"
+devices:
+  - {name: "SW-FL2-01", kind: "switch", ip: "192.168.20.2"}
+  - {name: "AP-FL2-01", kind: "ap", ip: "192.168.10.21", depends_on: "SW-FL2-01", clients: 8}
+  - {name: "HQ-CAM-012", kind: "camera", ip: "192.168.20.12", location: "HQ", status: "down", down_since: "-25m", depends_on: "SW-FL2-01"}
+generate:
+  - {kind: "camera", name: "HQ-CAM-00{n}", from: 1, to: 9, ip: "192.168.20.{n}", location: "HQ", depends_on: "SW-FL2-01"}
+  - {kind: "camera", name: "HQ-CAM-0{n}", from: 10, to: 11, ip: "192.168.20.{n}", location: "HQ", depends_on: "SW-FL2-01"}

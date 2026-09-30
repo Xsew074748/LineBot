@@ -1,0 +1,10 @@
+# ═══ CAS-04: NVR ล่ม → กล้อง 16 ตัวใน subnet เดียวกันออฟไลน์ตาม
+# เส้นทางในบอท: analyze_device {"type":"host","name":"SRV-NVR-01"}
+# หมายเหตุการจำลอง: กล้อง 16 ตัวอยู่ใน Zabbix กลุ่ม Camera (มี IP) และผูก depends_on กับ NVR; NVR อยู่กลุ่ม NVR (ไม่นับเป็นกล้อง)
+name: "CAS-04 — NVR ล่ม → กล้อง 16 ตัวใน subnet เดียวกันออฟไลน์ตาม"
+description: "กล้อง 16 ตัวอยู่ใน Zabbix กลุ่ม Camera (มี IP) และผูก depends_on กับ NVR; NVR อยู่กลุ่ม NVR (ไม่นับเป็นกล้อง)"
+devices:
+  - {name: "SW-PLANT-01", kind: "switch", ip: "192.168.30.2"}
+  - {name: "SRV-NVR-01", kind: "host", ip: "192.168.30.5", groups: ["NVR"], status: "down", down_since: "-25m"}
+generate:
+  - {kind: "host", name: "PLANT-CAM-{n}", from: 101, to: 116, ip: "192.168.30.{n}", groups: ["Camera"], depends_on: "SRV-NVR-01"}

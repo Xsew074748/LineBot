@@ -45,6 +45,8 @@ HIKCENTRAL_APP_SECRET=mock-app-secret
 name: "Switch ชั้น 2 ล่ม (ลูกโซ่)"
 description: "..."
 extends: 01-baseline-office.yaml     # ใช้ชุดอุปกรณ์จากไฟล์อื่นเป็นฐาน (เลือกได้)
+generate:                            # สร้างอุปกรณ์เป็นชุดจาก template: {n} = เลขจาก from..to, {i} = ลำดับเริ่มที่ 1
+  - {kind: camera, name: "HQ-CAM-{n}", from: 101, to: 116, ip: "192.168.30.{n}", location: "ชั้น 1"}
 devices:                             # เพิ่ม/ทับอุปกรณ์ (ชื่อซ้ำกับฐาน = ทับทั้งตัว)
   - {name: SRV-FILE-01, kind: host, ip: 192.168.1.30, metrics: {cpu: 22, memory_used: 48, disk_used: 81}}
 patch:                               # แก้เฉพาะฟิลด์ของอุปกรณ์ที่มีอยู่ (ไม่ต้องคัดลอกทั้งตัว)
@@ -72,6 +74,8 @@ alerts:                              # trigger ของ Zabbix ที่กำ�
 | `alerts` | trigger ของอุปกรณ์นี้ `[{description, priority 0-5, since, comments}]` |
 | `comments` | ข้อความที่ใส่ใน comments ของ trigger "Unavailable by ICMP ping" ของเครื่องนี้ |
 
+**alert ที่กำหนดเองแทนที่ trigger อัตโนมัติชนิดเดียวกัน:** ถ้าอุปกรณ์มี `alerts` ที่ชื่อเข้ากับ ICMP/CPU/memory/disk อยู่แล้ว mock จะไม่สร้างตัวอัตโนมัติชนิดนั้นซ้ำ (เขียน priority/comments เองได้)
+
 **trigger ที่ mock สร้างให้เอง** (ตรงกับที่ Zabbix template มาตรฐานสร้าง): อุปกรณ์ที่อยู่ใน Zabbix และ down → `Unavailable by ICMP ping` (priority 4);
 `cpu ≥ 90` → `High CPU utilization (over 90% for 5m)`; `memory_used ≥ 90` → `Lack of available memory (<10% of total)`; `disk_used ≥ 90` → `Free disk space is less than 10% on volume /`
 
@@ -87,6 +91,10 @@ alerts:                              # trigger ของ Zabbix ที่กำ�
 | `06-uplink-flapping.yaml` | uplink switch ชั้น 2 สะดุดเป็นรอบ | FLAP-01 |
 | `07-conflict-icmp-blocked.yaml` | Zabbix เห็น web server ล่มจาก ICMP แต่เครื่องปกติ | CON-02 |
 | `08-gateway-down.yaml` | gateway ล่ม LAN ปกติ | NET-02 |
+
+### สถานการณ์สำหรับชุดเปรียบเทียบ AI (`cmp-<เคส>.yaml`, 34 ไฟล์)
+
+หนึ่งไฟล์ต่อเคสใน `ai-comparison/scenarios/` (เช่น `cmp-CAS-01.yaml`) แต่ละไฟล์อิสระ (ไม่ extends) และมีหมายเหตุที่หัวไฟล์ว่าเส้นทางในบอทที่ใช้และส่วนใดต้องพึ่ง comments — ใช้ผ่าน `ai-comparison/tools/run-comparison.js` (ดู `ai-comparison/README.md`) ไม่ได้มีไว้ให้รันบอทเล่นเอง (ชื่ออุปกรณ์บางเคสถูกตั้งให้ตรงตรรกะจัดกลุ่ม zone ของบอท)
 
 ## เปลี่ยนสถานการณ์/สร้าง-แก้-ลบอุปกรณ์ขณะรัน (ไม่ต้อง restart)
 

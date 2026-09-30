@@ -1,0 +1,12 @@
+# ═══ NET-04: AP 2 ตัวชั้นเดียวกันดับพร้อมกัน กล้อง subnet เดียวกันปกติ
+# เส้นทางในบอท: analyze_device {"type":"ap","name":"AP-FL3-02"}
+# หมายเหตุการจำลอง: AP ดับสองตัวโดยตรง (ไม่ผูก dependency ที่ทำให้ switch ดับ) ขณะ switch และกล้องปกติ — ตรงหลักฐาน "กล้องปกติ"
+name: "NET-04 — AP 2 ตัวชั้นเดียวกันดับพร้อมกัน กล้อง subnet เดียวกันปกติ"
+description: "AP ดับสองตัวโดยตรง (ไม่ผูก dependency ที่ทำให้ switch ดับ) ขณะ switch และกล้องปกติ — ตรงหลักฐาน \"กล้องปกติ\""
+devices:
+  - {name: "SW-FL3-01", kind: "switch", ip: "192.168.30.2"}
+  - {name: "AP-FL3-01", kind: "ap", ip: "192.168.30.11", depends_on: "SW-FL3-01", clients: 6}
+  - {name: "AP-FL3-02", kind: "ap", ip: "192.168.30.12", status: "down", down_since: "-15m", depends_on: "SW-FL3-01"}
+  - {name: "AP-FL3-03", kind: "ap", ip: "192.168.30.13", status: "down", down_since: "-15m", depends_on: "SW-FL3-01"}
+  - {name: "FL3-CAM-01", kind: "host", ip: "192.168.30.41", groups: ["Camera"], depends_on: "SW-FL3-01"}
+  - {name: "FL3-CAM-02", kind: "host", ip: "192.168.30.42", groups: ["Camera"], depends_on: "SW-FL3-01"}

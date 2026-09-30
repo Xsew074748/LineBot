@@ -1,0 +1,11 @@
+# ═══ CAM-03: กล้องครึ่งไซต์ (หมายเลข 101-116) ออฟไลน์เป็นช่วงต่อเนื่อง
+# เส้นทางในบอท: ctx_camera
+# หมายเหตุการจำลอง: กล้อง 32 ตัว (HikCentral) ที่ 101-116 ดับเพราะ SW-CAM-A ล่ม — บอทแสดงเพียง 5 ชื่อแรกใน context (ตรงกับพฤติกรรมจริง)
+name: "CAM-03 — กล้องครึ่งไซต์ (หมายเลข 101-116) ออฟไลน์เป็นช่วงต่อเนื่อง"
+description: "กล้อง 32 ตัว (HikCentral) ที่ 101-116 ดับเพราะ SW-CAM-A ล่ม — บอทแสดงเพียง 5 ชื่อแรกใน context (ตรงกับพฤติกรรมจริง)"
+devices:
+  - {name: "SW-CAM-A", kind: "switch", ip: "192.168.70.2", status: "down", down_since: "-20m"}
+  - {name: "SW-CAM-B", kind: "switch", ip: "192.168.70.3"}
+generate:
+  - {kind: "camera", name: "HQ-CAM-{n}", from: 101, to: 116, location: "HQ", depends_on: "SW-CAM-A"}
+  - {kind: "camera", name: "HQ-CAM-{n}", from: 117, to: 132, location: "HQ", depends_on: "SW-CAM-B"}

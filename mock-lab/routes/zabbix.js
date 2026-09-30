@@ -83,13 +83,18 @@ module.exports = function zabbixRoutes(holder, cfg) {
           lastchange: String(since), comments: comments || '', value: '1',
           hosts: [{ hostid: h.hostid, host: h.host, name: h.name }],
         });
+        // trigger อัตโนมัติ (ICMP/metrics) จะถูกข้ามถ้าอุปกรณ์นั้นมี alert ที่กำหนดเองชนิดเดียวกัน (ชื่อ trigger ตรงรูปแบบ)
+        // → เขียน alert เองพร้อม comments/priority ที่ต้องการได้โดยไม่ซ้ำกับตัวอัตโนมัติ
+        const AUTO = { icmp: /icmp|unavailable/i, cpu: /cpu/i, memory: /memory/i, disk: /disk|space/i };
         for (const h of hosts) {
           const d = h._device;
-          if (state.viewStatus(d, 'zabbix', now) === 'down') push(h, 'Unavailable by ICMP ping', PRIORITY_DEFAULT.icmp, state.downSince(d, now), d.comments);
+          const explicit = [...d.alerts, ...state.explicitAlerts.filter((a) => a.host === d.name)];
+          const covered = (kind) => explicit.some((a) => AUTO[kind].test(a.description || ''));
+          if (state.viewStatus(d, 'zabbix', now) === 'down' && !covered('icmp')) push(h, 'Unavailable by ICMP ping', PRIORITY_DEFAULT.icmp, state.downSince(d, now), d.comments);
           const m = d.metrics;
-          if (m.cpu >= 90) push(h, 'High CPU utilization (over 90% for 5m)', PRIORITY_DEFAULT.cpu, state.loadedAt - 600, `CPU util ${m.cpu}%`);
-          if (m.memory_used >= 90) push(h, 'Lack of available memory (<10% of total)', PRIORITY_DEFAULT.memory, state.loadedAt - 600, `หน่วยความจำใช้ ${m.memory_used}%`);
-          if (m.disk_used >= 90) push(h, 'Free disk space is less than 10% on volume /', PRIORITY_DEFAULT.disk, state.loadedAt - 600, `พื้นที่ใช้ ${m.disk_used}%`);
+          if (m.cpu >= 90 && !covered('cpu')) push(h, 'High CPU utilization (over 90% for 5m)', PRIORITY_DEFAULT.cpu, state.loadedAt - 600, `CPU util ${m.cpu}%`);
+          if (m.memory_used >= 90 && !covered('memory')) push(h, 'Lack of available memory (<10% of total)', PRIORITY_DEFAULT.memory, state.loadedAt - 600, `หน่วยความจำใช้ ${m.memory_used}%`);
+          if (m.disk_used >= 90 && !covered('disk')) push(h, 'Free disk space is less than 10% on volume /', PRIORITY_DEFAULT.disk, state.loadedAt - 600, `พื้นที่ใช้ ${m.disk_used}%`);
           for (const a of d.alerts) push(h, a.description, a.priority ?? 3, a.since !== undefined ? parseTime(a.since, state.loadedAt) : state.loadedAt, a.comments);
         }
         for (const a of state.explicitAlerts) {

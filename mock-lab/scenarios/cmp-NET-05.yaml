@@ -1,0 +1,10 @@
+# ═══ NET-05: AP สำรองในโกดังหลุด (ไม่มีผู้ใช้กระทบ)
+# เส้นทางในบอท: alert {"host":"AP-WH-Spare-02","descriptionIncludes":"Disconnected"}
+# หมายเหตุการจำลอง: alert มาจาก Zabbix trigger ของ AP ที่สะท้อนเข้า Zabbix (trigger ICMP อัตโนมัติถูกแทนที่ด้วย alert ที่กำหนดเอง)
+name: "NET-05 — AP สำรองในโกดังหลุด (ไม่มีผู้ใช้กระทบ)"
+description: "alert มาจาก Zabbix trigger ของ AP ที่สะท้อนเข้า Zabbix (trigger ICMP อัตโนมัติถูกแทนที่ด้วย alert ที่กำหนดเอง)"
+devices:
+  - {name: "SW-WH-01", kind: "switch", ip: "192.168.50.2"}
+  - {name: "AP-WH-Spare-02", kind: "ap", ip: "192.168.50.12", status: "down", down_since: "-40m", depends_on: "SW-WH-01", zabbix: {"groups":["Network"]}}
+alerts:
+  - {host: "AP-WH-Spare-02", description: "Omada: AP-WH-Spare-02 Disconnected", priority: 2, since: "2026-10-15T08:20:11+07:00", comments: "AP สำรองในโกดัง ไม่ได้ใช้งานประจำ เปิดใช้เฉพาะช่วงจัดอีเว้นต์ ไม่มีผู้ใช้เชื่อมต่อ"}

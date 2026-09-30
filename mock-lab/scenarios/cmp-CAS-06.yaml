@@ -1,0 +1,9 @@
+# ═══ CAS-06: กล้อง 6 ตัวโซนเดียวกันหลุดพร้อมกัน แต่มีชนิดเดียว ไม่มี infra (confidence = medium)
+# เส้นทางในบอท: cross {"include_medium":true}
+# หมายเหตุการจำลอง: production ส่งเฉพาะกลุ่ม high ให้ AI — เคสนี้จึงข้ามตัวกรองนั้น (ระบุ include_medium) เพื่อทดสอบกลุ่ม medium ตามเจตนาเฉลย
+name: "CAS-06 — กล้อง 6 ตัวโซนเดียวกันหลุดพร้อมกัน แต่มีชนิดเดียว ไม่มี infra (confidence = medium)"
+description: "production ส่งเฉพาะกลุ่ม high ให้ AI — เคสนี้จึงข้ามตัวกรองนั้น (ระบุ include_medium) เพื่อทดสอบกลุ่ม medium ตามเจตนาเฉลย"
+devices:
+  - {name: "SRV-APP-01", kind: "host", ip: "192.168.1.11", groups: ["Servers"]}
+generate:
+  - {kind: "camera", name: "PK-T-CAM0{i}", from: 1, to: 6, ip: "192.168.95.{n}", location: "PK-T", status: "down", down_since: "-100s"}

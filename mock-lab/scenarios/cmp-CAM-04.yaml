@@ -1,0 +1,9 @@
+# ═══ CAM-04: กล้องประตูทางเข้าหลักออฟไลน์เกิน 4 วัน
+# เส้นทางในบอท: camera_off
+# หมายเหตุการจำลอง: ใช้เส้นทาง "กล้องดับ → วิเคราะห์กล้อง" (มีระยะเวลาดับจาก Zabbix problem clock และตำแหน่งจาก inventory) เพราะเส้นทาง "วิเคราะห์กล้อง CAM-xxx" ของบอทไม่มีข้อมูลระยะเวลา
+name: "CAM-04 — กล้องประตูทางเข้าหลักออฟไลน์เกิน 4 วัน"
+description: "ใช้เส้นทาง \"กล้องดับ → วิเคราะห์กล้อง\" (มีระยะเวลาดับจาก Zabbix problem clock และตำแหน่งจาก inventory) เพราะเส้นทาง \"วิเคราะห์กล้อง CAM-xxx\" ของบอทไม่มีข้อมูลระยะเวลา"
+devices:
+  - {name: "HQ-CAM-003", kind: "host", ip: "192.168.20.3", groups: ["Camera"], location: "ประตูทางเข้าหลัก", status: "down", down_since: "-4d3h"}
+  - {name: "HQ-CAM-004", kind: "host", ip: "192.168.20.4", groups: ["Camera"], location: "ห้องโถง"}
+  - {name: "HQ-CAM-005", kind: "host", ip: "192.168.20.5", groups: ["Camera"], location: "ลานจอดรถ"}

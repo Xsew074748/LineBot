@@ -1,0 +1,9 @@
+# ═══ HOST-01: CPU สูงต่อเนื่องจากโปรเซส java ตัวเดียว
+# เส้นทางในบอท: alert {"host":"SRV-APP-01","descriptionIncludes":"High CPU"}
+# หมายเหตุการจำลอง: metrics cpu 97.8 อ่านได้ผ่าน item.get; ชื่อโปรเซส/load/deploy ต้องพึ่ง comments (mock ไม่มีข้อมูลระดับโปรเซส)
+name: "HOST-01 — CPU สูงต่อเนื่องจากโปรเซส java ตัวเดียว"
+description: "metrics cpu 97.8 อ่านได้ผ่าน item.get; ชื่อโปรเซส/load/deploy ต้องพึ่ง comments (mock ไม่มีข้อมูลระดับโปรเซส)"
+devices:
+  - {name: "SRV-APP-01", kind: "host", ip: "192.168.1.11", groups: ["Servers"], metrics: {"cpu":97.8,"memory_used":61,"disk_used":48}}
+alerts:
+  - {host: "SRV-APP-01", description: "High CPU utilization (over 90% for 5m)", priority: 4, since: "2026-10-15T14:31:05+07:00", comments: "Operational data: CPU util 97.8%, load average 18.2 (4 คอร์); top process: java (PID 2210) ใช้ CPU 94%; เพิ่งมีการ deploy แอปเวอร์ชันใหม่ 14:20"}

@@ -1,0 +1,12 @@
+# ═══ CON-04: HikCentral เห็นกล้องออนไลน์ แต่ Zabbix เห็น packet loss 62% (เฉพาะกล้องตัวเดียว)
+# เส้นทางในบอท: alert {"host":"HQ-CAM-030","descriptionIncludes":"ICMP loss"}
+# หมายเหตุการจำลอง: กล้องตัวเดียวปกติในทั้งสองระบบ (up) + alert คุณภาพลิงก์; ตัวเลข packet loss อยู่ใน comments (mock ไม่มี ping loss)
+name: "CON-04 — HikCentral เห็นกล้องออนไลน์ แต่ Zabbix เห็น packet loss 62% (เฉพาะกล้องตัวเดียว)"
+description: "กล้องตัวเดียวปกติในทั้งสองระบบ (up) + alert คุณภาพลิงก์; ตัวเลข packet loss อยู่ใน comments (mock ไม่มี ping loss)"
+devices:
+  - {name: "SW-FL1-02", kind: "switch", ip: "192.168.20.2", zabbix: {"groups":["Network"]}}
+  - {name: "HQ-CAM-030", kind: "camera", ip: "192.168.20.30", location: "ชั้น 1", depends_on: "SW-FL1-02", zabbix: true}
+generate:
+  - {kind: "camera", name: "HQ-CAM-03{i}", from: 1, to: 5, ip: "192.168.20.3{i}", location: "ชั้น 1", depends_on: "SW-FL1-02", zabbix: true}
+alerts:
+  - {host: "HQ-CAM-030", description: "High ICMP loss (>40% for 5m)", priority: 3, since: "2026-10-16T11:25:00+07:00", comments: "HikCentral รายงานสถานะออนไลน์ แต่ frame rate ตก 25→3 fps; ping loss 62% RTT เฉลี่ย 380 ms; กล้องอื่น 5 ตัวบน SW-FL1-02 เดียวกันปกติ (loss 0%)"}

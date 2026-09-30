@@ -1,0 +1,9 @@
+# ═══ CON-02: Zabbix ICMP บอกเว็บเซิร์ฟเวอร์ล่ม แต่ agent/HTTP ปกติ (firewall เพิ่งเปลี่ยน)
+# เส้นทางในบอท: alert {"host":"SRV-WEB-03","descriptionIncludes":"ICMP"}
+# หมายเหตุการจำลอง: zabbix_status=down (เห็น ICMP ล้ม) ขณะเครื่องจริงปกติ และ metrics ยังส่งค่า
+name: "CON-02 — Zabbix ICMP บอกเว็บเซิร์ฟเวอร์ล่ม แต่ agent/HTTP ปกติ (firewall เพิ่งเปลี่ยน)"
+description: "zabbix_status=down (เห็น ICMP ล้ม) ขณะเครื่องจริงปกติ และ metrics ยังส่งค่า"
+devices:
+  - {name: "SRV-WEB-03", kind: "host", ip: "192.168.5.13", groups: ["Servers"], zabbix_status: "down", down_since: "2026-10-16T15:10:00+07:00", metrics: {"cpu":30,"memory_used":52,"disk_used":44}}
+alerts:
+  - {host: "SRV-WEB-03", description: "Unavailable by ICMP ping", priority: 4, since: "2026-10-16T15:10:00+07:00", comments: "Zabbix Agent (active) ยังส่งข้อมูลล่าสุดเมื่อ 20 วินาทีก่อน; ตรวจเว็บจาก external monitor ตอบ HTTP 200 ปกติ; มีการเปลี่ยน firewall rule ของ VLAN เซิร์ฟเวอร์เมื่อ 15:05 (CHG-2305)"}

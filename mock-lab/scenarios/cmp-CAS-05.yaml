@@ -1,0 +1,16 @@
+# ═══ CAS-05: ทุกระบบล่มกว้าง (hosts 2/13, กล้อง 4/32) — จุดร่วมระดับแกนกลาง
+# เส้นทางในบอท: ctx_summary
+# หมายเหตุการจำลอง: Zabbix hosts 13 (down 11: switch 4 + server 7); กล้อง 32 (online 4); AP 8 (client เหลือ 3) — ตรงตัวเลขเฉลย; กล้องทั้งหมดอยู่ HikCentral อย่างเดียว
+name: "CAS-05 — ทุกระบบล่มกว้าง (hosts 2/13, กล้อง 4/32) — จุดร่วมระดับแกนกลาง"
+description: "Zabbix hosts 13 (down 11: switch 4 + server 7); กล้อง 32 (online 4); AP 8 (client เหลือ 3) — ตรงตัวเลขเฉลย; กล้องทั้งหมดอยู่ HikCentral อย่างเดียว"
+devices:
+  - {name: "CORE-SW01", kind: "switch", ip: "192.168.1.2", status: "down", down_since: "-4m", zabbix: {"groups":["Network"]}}
+  - {name: "SRV-MON-01", kind: "host", ip: "192.168.1.90", groups: ["Servers"], ignore_dependency: true}
+  - {name: "SRV-OFFSITE-01", kind: "host", ip: "203.0.113.10", groups: ["Servers"], ignore_dependency: true}
+  - {name: "AP-08", kind: "ap", ip: "192.168.10.8", ignore_dependency: true, clients: 3}
+generate:
+  - {kind: "switch", name: "FL{n}-SW01", from: 1, to: 3, ip: "192.168.{n}0.2", depends_on: "CORE-SW01", zabbix: {"groups":["Network"]}}
+  - {kind: "host", name: "SRV-0{n}", from: 1, to: 7, ip: "192.168.1.1{n}", groups: ["Servers"], depends_on: "CORE-SW01"}
+  - {kind: "ap", name: "AP-0{n}", from: 1, to: 7, ip: "192.168.10.{n}", depends_on: "FL1-SW01", clients: 9}
+  - {kind: "camera", name: "HQ-CAM-{n}", from: 101, to: 128, location: "HQ", depends_on: "CORE-SW01"}
+  - {kind: "camera", name: "HQ-CAM-{n}", from: 129, to: 132, location: "HQ", ignore_dependency: true}

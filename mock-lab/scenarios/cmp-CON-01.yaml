@@ -1,0 +1,9 @@
+# ═══ CON-01: Zabbix เห็น NVR ออนไลน์ แต่ HikCentral เห็นกล้องใต้ NVR ออฟไลน์ทั้ง 8 ตัว
+# เส้นทางในบอท: analyze_device {"type":"host","name":"SRV-NVR-02"}
+# หมายเหตุการจำลอง: กล้องอยู่ใน HikCentral อย่างเดียว (down) ขณะ NVR ปกติใน Zabbix — ความขัดแย้งจริงข้ามระบบ; บอทจับ subnet กล้อง HikCentral ไม่ได้ (ไม่มี IP) จึงเห็นเฉพาะรายการ "ออฟไลน์ทั้งหมด 8 ตัว"
+name: "CON-01 — Zabbix เห็น NVR ออนไลน์ แต่ HikCentral เห็นกล้องใต้ NVR ออฟไลน์ทั้ง 8 ตัว"
+description: "กล้องอยู่ใน HikCentral อย่างเดียว (down) ขณะ NVR ปกติใน Zabbix — ความขัดแย้งจริงข้ามระบบ; บอทจับ subnet กล้อง HikCentral ไม่ได้ (ไม่มี IP) จึงเห็นเฉพาะรายการ \"ออฟไลน์ทั้งหมด 8 ตัว\""
+devices:
+  - {name: "SRV-NVR-02", kind: "host", ip: "192.168.40.5", groups: ["NVR"]}
+generate:
+  - {kind: "camera", name: "PLANT-CAM-{n}", from: 111, to: 118, ip: "192.168.40.{n}", location: "PLANT", status: "down", down_since: "-35m"}

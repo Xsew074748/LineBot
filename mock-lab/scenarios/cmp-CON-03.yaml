@@ -1,0 +1,10 @@
+# ═══ CON-03: Omada เห็น AP ออนไลน์ (uplink ไร้สาย) แต่ Zabbix เห็นพอร์ตสายแลนของ AP นั้น down
+# เส้นทางในบอท: alert {"host":"SW-FL1-01","descriptionIncludes":"Gi0/7"}
+# หมายเหตุการจำลอง: AP ออนไลน์ใน Omada (มี 18 client) จริง; รายละเอียด uplink ไร้สายอยู่ใน comments (mock ไม่มีข้อมูล uplink ของ AP)
+name: "CON-03 — Omada เห็น AP ออนไลน์ (uplink ไร้สาย) แต่ Zabbix เห็นพอร์ตสายแลนของ AP นั้น down"
+description: "AP ออนไลน์ใน Omada (มี 18 client) จริง; รายละเอียด uplink ไร้สายอยู่ใน comments (mock ไม่มีข้อมูล uplink ของ AP)"
+devices:
+  - {name: "SW-FL1-01", kind: "switch", ip: "192.168.10.2", zabbix: {"groups":["Network"]}}
+  - {name: "AP-Floor1-02", kind: "ap", ip: "192.168.10.12", clients: 18}
+alerts:
+  - {host: "SW-FL1-01", description: "Interface Gi0/7 (AP-Floor1-02): Link down", priority: 3, since: "2026-10-16T09:40:15+07:00", comments: "Omada รายงาน AP-Floor1-02 ยังออนไลน์ (uplink: Wireless, RSSI -71 dBm, ความเร็ว 65 Mbps) ขณะที่ Zabbix รายงานพอร์ต Gi0/7 ที่ต่อสาย AP นี้ down มา 25 นาที; มี client บน AP นี้ 18 เครื่อง แจ้งว่าช้า"}

@@ -1,0 +1,14 @@
+# ═══ NET-03: Switch ชั้น 3 ล่ม พา AP 3 ตัวหลุดตาม
+# เส้นทางในบอท: ctx_wifi
+# หมายเหตุการจำลอง: AP 8, Switch 3, Gateway 1; SW-FL3-01 ดับ → AP-FL3-01..03 ดับตามด้วย depends_on
+name: "NET-03 — Switch ชั้น 3 ล่ม พา AP 3 ตัวหลุดตาม"
+description: "AP 8, Switch 3, Gateway 1; SW-FL3-01 ดับ → AP-FL3-01..03 ดับตามด้วย depends_on"
+devices:
+  - {name: "GW-EDGE-01", kind: "gateway", ip: "192.168.1.1"}
+  - {name: "SW-CORE-01", kind: "switch", ip: "192.168.1.2"}
+  - {name: "SW-FL2-01", kind: "switch", ip: "192.168.20.2", depends_on: "SW-CORE-01"}
+  - {name: "SW-FL3-01", kind: "switch", ip: "192.168.30.2", status: "down", down_since: "-9m", depends_on: "SW-CORE-01"}
+generate:
+  - {kind: "ap", name: "AP-FL1-0{i}", from: 1, to: 2, ip: "192.168.10.1{i}", depends_on: "SW-CORE-01", clients: 7}
+  - {kind: "ap", name: "AP-FL2-0{i}", from: 1, to: 3, ip: "192.168.20.1{i}", depends_on: "SW-FL2-01", clients: 7}
+  - {kind: "ap", name: "AP-FL3-0{i}", from: 1, to: 3, ip: "192.168.30.1{i}", depends_on: "SW-FL3-01", clients: 7}

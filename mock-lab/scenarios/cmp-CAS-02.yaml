@@ -1,0 +1,11 @@
+# ═══ CAS-02: กล้อง 4 + AP 2 ชั้น 3 ดับพร้อมกัน แต่ switch ไม่อยู่ในรายการ (ไม่ได้ monitor)
+# เส้นทางในบอท: cross
+# หมายเหตุการจำลอง: switch ต้นตอ "ไม่ถูก monitor ใน Zabbix" (อยู่ใน Omada เท่านั้น ซึ่งไม่เข้า correlate) → กลุ่มไม่มี switch ตรงเจตนา hallucination trap
+name: "CAS-02 — กล้อง 4 + AP 2 ชั้น 3 ดับพร้อมกัน แต่ switch ไม่อยู่ในรายการ (ไม่ได้ monitor)"
+description: "switch ต้นตอ \"ไม่ถูก monitor ใน Zabbix\" (อยู่ใน Omada เท่านั้น ซึ่งไม่เข้า correlate) → กลุ่มไม่มี switch ตรงเจตนา hallucination trap"
+devices:
+  - {name: "FL3-A-SW01", kind: "switch", ip: "192.168.30.2", status: "down", down_since: "-100s"}
+  - {name: "SRV-APP-01", kind: "host", ip: "192.168.1.11", groups: ["Servers"]}
+generate:
+  - {kind: "ap", name: "FL3-A-AP-0{i}", from: 1, to: 2, ip: "192.168.30.1{i}", depends_on: "FL3-A-SW01", zabbix: {"groups":["Network"]}}
+  - {kind: "camera", name: "FL3-A-CAM{n}", from: 301, to: 304, ip: "192.168.30.{n}", location: "FL3-A", depends_on: "FL3-A-SW01"}

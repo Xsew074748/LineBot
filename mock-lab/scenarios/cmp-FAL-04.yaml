@@ -1,0 +1,9 @@
+# ═══ FAL-04: Bandwidth uplink พุ่ง 84% เช้าวันจันทร์ทุกสัปดาห์
+# เส้นทางในบอท: alert {"host":"SW-CORE-01","descriptionIncludes":"bandwidth"}
+# หมายเหตุการจำลอง: ประวัติทราฟฟิกอยู่ใน comments
+name: "FAL-04 — Bandwidth uplink พุ่ง 84% เช้าวันจันทร์ทุกสัปดาห์"
+description: "ประวัติทราฟฟิกอยู่ใน comments"
+devices:
+  - {name: "SW-CORE-01", kind: "switch", ip: "192.168.1.2", zabbix: {"groups":["Network"]}}
+alerts:
+  - {host: "SW-CORE-01", description: "High bandwidth usage on interface Gi0/1 (uplink) (>80% for 10m)", priority: 2, since: "2026-10-19T08:52:30+07:00", comments: "วันจันทร์ 08:45 พนักงาน ~300 คนเข้าระบบพร้อมกัน; สูงสุด 84% นาน 12 นาที แล้วลดลงเองเหลือ ~40%; เกิดซ้ำทุกวันจันทร์ (ประวัติ 8 สัปดาห์); ค่าเฉลี่ยวันปกติ 35%; ไม่มี packet loss และผู้ใช้ไม่แจ้งว่าช้า"}

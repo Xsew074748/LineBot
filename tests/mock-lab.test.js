@@ -99,6 +99,15 @@ describe('mock-lab / scenario loader', () => {
     const down = s.list().filter((d) => s.physicalStatus(d, now) === 'down').map((d) => d.name).sort();
     expect(down).toEqual(['AP-FL2-01', 'AP-FL2-02', 'HQ-CAM-201', 'HQ-CAM-202', 'HQ-CAM-203', 'HQ-CAM-204', 'HQ-CAM-205', 'SW-FL2-01']);
   });
+  test('generate: สร้างอุปกรณ์เป็นชุดจาก template ({n} {i}) และตรวจ from/to', () => {
+    const s = loadScenarioYaml('generate:\n  - {kind: camera, name: "CAM-{n}", from: 101, to: 103, ip: "10.0.0.{i}", location: L}\n');
+    expect(s.list().map((d) => [d.name, d.ip])).toEqual([['CAM-101', '10.0.0.1'], ['CAM-102', '10.0.0.2'], ['CAM-103', '10.0.0.3']]);
+    expect(() => loadScenarioYaml('generate:\n  - {kind: ap, name: "A{n}", from: 5, to: 1}\n')).toThrow(/from/);
+  });
+  test('ทุกเคสของชุดเปรียบเทียบ AI (cmp-*.yaml) โหลดได้ครบ 34 ไฟล์', () => {
+    const cmp = listScenarios().filter((f) => /^cmp-.+\.yaml$/.test(f.file));
+    expect(cmp).toHaveLength(34);
+  });
   test('inline YAML + ข้อผิดพลาดที่อ่านออก', () => {
     const s = loadScenarioYaml('name: t\ndevices:\n  - {name: A, kind: switch}\n  - {name: B, kind: ap, depends_on: A, status: up}\n');
     expect(s.devices.size).toBe(2);
@@ -252,6 +261,14 @@ describe('mock-lab / compat กับ service ของบอทจริง', (
     r = await api('POST', '/mock/reset');
     expect(r.body.scenario.source).toBe('08-gateway-down.yaml'); // reset = กลับไปสถานการณ์ที่โหลดล่าสุด
     expect((await api('GET', '/mock/requests?limit=5')).body.length).toBeGreaterThan(0);
+  });
+
+  test('alert ที่กำหนดเองแทนที่ trigger อัตโนมัติชนิดเดียวกัน (ไม่ซ้ำ) แต่ชนิดอื่นยังสร้างเอง', async () => {
+    await api('PATCH', '/mock/devices/SRV-APP-01', { status: 'down', metrics: { cpu: 99 }, alerts: [{ description: 'Unavailable by ICMP ping', priority: 5, comments: 'ตามแผน' }] });
+    const mine = (await zabbix.getProblems(200)).filter((p) => p.host === 'SRV-APP-01');
+    expect(mine.map((p) => p.description).sort()).toEqual(['High CPU utilization (over 90% for 5m)', 'Unavailable by ICMP ping']);
+    expect(mine.find((p) => p.description.includes('ICMP')).priority).toBe(5);   // ตัวที่กำหนดเอง ไม่ใช่ auto (4)
+    expect(mine.find((p) => p.description.includes('ICMP')).comments).toBe('ตามแผน');
   });
 
   test('ไม่มีข้อมูล secret ใน /mock/requests และ / แสดงค่า .env สำหรับบอท', async () => {

@@ -1,0 +1,9 @@
+# ═══ FAL-01: server ดับตามแผน maintenance window (ป้ายวิกฤต)
+# เส้นทางในบอท: alert {"host":"SRV-APP-02","descriptionIncludes":"ICMP"}
+# หมายเหตุการจำลอง: เครื่องดับจริงในระบบ (ICMP) แต่บริบท maintenance อยู่ใน comments (mock ไม่มีฟีเจอร์ maintenance period)
+name: "FAL-01 — server ดับตามแผน maintenance window (ป้ายวิกฤต)"
+description: "เครื่องดับจริงในระบบ (ICMP) แต่บริบท maintenance อยู่ใน comments (mock ไม่มีฟีเจอร์ maintenance period)"
+devices:
+  - {name: "SRV-APP-02", kind: "host", ip: "192.168.1.12", groups: ["Servers"], status: "down", down_since: "2026-10-16T02:14:07+07:00"}
+alerts:
+  - {host: "SRV-APP-02", description: "Unavailable by ICMP ping", priority: 5, since: "2026-10-16T02:14:07+07:00", comments: "อยู่ในช่วง Maintenance ตามแผน CHG-2291: ติดตั้ง Windows patch และรีบูต เวลา 02:00-04:00 (ผู้ดำเนินการ: ทีม Infra); ได้รับอนุมัติแล้ว"}

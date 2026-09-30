@@ -1,0 +1,9 @@
+# ═══ HOST-05: ดิสก์เสื่อม RAID5 degraded ไม่มี hot spare
+# เส้นทางในบอท: alert {"host":"SRV-FILE-01","descriptionIncludes":"I/O wait"}
+# หมายเหตุการจำลอง: mock ไม่จำลอง SMART/RAID — ทั้งหมดอยู่ใน comments
+name: "HOST-05 — ดิสก์เสื่อม RAID5 degraded ไม่มี hot spare"
+description: "mock ไม่จำลอง SMART/RAID — ทั้งหมดอยู่ใน comments"
+devices:
+  - {name: "SRV-FILE-01", kind: "host", ip: "192.168.1.30", groups: ["Servers"], metrics: {"cpu":22,"memory_used":48,"disk_used":81}}
+alerts:
+  - {host: "SRV-FILE-01", description: "High I/O wait time (over 30% for 10m)", priority: 4, since: "2026-10-15T13:48:22+07:00", comments: "Operational data: iowait 47%; ดิสก์ sdb: SMART Reallocated_Sector_Ct = 1284 (สัปดาห์ก่อน 96), Current_Pending_Sector = 37; RAID5 (4 ดิสก์) สถานะ degraded — sdb ถูกตัดออกจาก array เมื่อ 20 นาทีก่อน; ไม่มี hot spare"}

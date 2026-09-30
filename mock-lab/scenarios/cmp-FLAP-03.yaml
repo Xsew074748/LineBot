@@ -1,0 +1,10 @@
+# ═══ FLAP-03: กล้อง Online/Offline สลับ 12 ครั้ง/20 นาที (IP ชนกัน)
+# เส้นทางในบอท: alert {"host":"HQ-CAM-021","descriptionIncludes":"สลับกัน"}
+# หมายเหตุการจำลอง: ARP/ประวัติสลับอยู่ใน comments
+name: "FLAP-03 — กล้อง Online/Offline สลับ 12 ครั้ง/20 นาที (IP ชนกัน)"
+description: "ARP/ประวัติสลับอยู่ใน comments"
+devices:
+  - {name: "SW-FL1-01", kind: "switch", ip: "192.168.20.2", zabbix: {"groups":["Network"]}}
+  - {name: "HQ-CAM-021", kind: "camera", ip: "192.168.20.21", location: "ชั้น 1", depends_on: "SW-FL1-01", zabbix: true}
+alerts:
+  - {host: "HQ-CAM-021", description: "HikCentral: HQ-CAM-021 ออนไลน์/ออฟไลน์ สลับกัน", priority: 3, since: "2026-10-15T12:20:10+07:00", comments: "สลับ 12 ครั้งใน 20 นาที; ping ตอบเป็นช่วงๆ; ARP table บน SW-FL1-01 พบ 192.168.20.21 สลับระหว่าง 2 MAC (ลงท้าย :3A:11 = กล้อง, :9C:E4 = อุปกรณ์ที่ไม่ทราบ); เมื่อวานมีติดตั้ง IP phone ใหม่ในโซนเดียวกัน"}
