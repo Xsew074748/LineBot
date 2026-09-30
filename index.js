@@ -134,26 +134,91 @@ function checkUserRateLimit(userId) {
   return entry.count <= limit.perUser;
 }
 
-// ── AI quota wrapper — ตรวจสอบสิทธิ์ + quota ก่อน call AI ─────────────────────
-// ข้อความเมื่อ canUseAI() ไม่ผ่าน — ใช้ร่วมกันระหว่าง withAI และ handleAnalyze
+// ── AI wrapper — ตรวจสิทธิ์/quota + ack ทันที + ส่งผลด้วย push ─────────────────────
+// ปัญหาเดิม: reply() หลังรอ AI จน replyToken หมดอายุ (Gemini ช้า/503+retry ได้ 30+ วินาที)
+// → ผู้ใช้ไม่ได้อะไรกลับเลยทั้งที่ AI ทำสำเร็จ  วิธีแก้: reply ack ครั้งเดียวทันที แล้ว push ผลทีหลัง
+//
+// ใช้ 2 ขั้น:
+//   1) aiGate(userId, replyToken)            — เช็คสิทธิ์/quota (ไม่ผ่าน = reply ปฏิเสธแล้วคืน false)
+//   2) startAiJob(userId, replyToken, kind, job[, ackText])
+//        job = async () => flexContents ที่จะ push  (โยน AiUserError ได้ถ้าต้องบอกผู้ใช้ตรงๆ เช่น "ไม่พบกล้อง")
+//
+// aiInFlight: userId → เวลาที่เริ่มงาน (in-memory) ใช้ร่วมกันทุกประเภทงาน AI ต่อผู้ใช้ 1 คน
+//   เหตุผลที่ใช้ตัวเดียวร่วมกัน (ไม่แยกตามประเภท): quota นับต่อผู้ใช้ต่อวัน และงานที่ซ้อนกันทำให้
+//   ผู้ใช้ได้ ack/ผลหลายก้อนปนกันจนสับสนว่าอันไหนของคำสั่งไหน + เปลืองโควตา/token โดยไม่จำเป็น
+//   (ผู้ใช้ 1 คนไม่ควรมีงาน AI พร้อมกันหลายงาน — รองาน 30 วินาทีแล้วค่อยสั่งใหม่ไม่เสียหาย)
+// ปลดล็อกใน finally เสมอ; AI_JOB_STALE_MS กันกรณี AI ค้างไม่ตอบ (fetch ของ provider ไม่มี timeout)
+//   ไม่ให้ผู้ใช้ถูกล็อกถาวรจนกว่าจะ restart bot
+const aiInFlight = new Map();
+const AI_JOB_STALE_MS = 3 * 60 * 1000;
+const AI_ACK_TEXT  = '🔍 กำลังวิเคราะห์ กรุณารอสักครู่...';
+const AI_BUSY_TEXT = '⏳ กำลังวิเคราะห์อยู่ กรุณารอสักครู่...';
+
+// ข้อผิดพลาดที่ต้องแจ้งผู้ใช้ตรงๆ (ไม่ใช่ AI ล่ม) — ไม่นับ quota
+class AiUserError extends Error {}
+
+// ข้อความเมื่อ canUseAI() ไม่ผ่าน
 function aiDenialMessage(check) {
   if (check.reason === 'role') return 'คุณไม่มีสิทธิ์ใช้งาน AI (ต้องการ IT_STAFF ขึ้นไป)';
   return `ใช้ AI ครบโควต้าวันนี้แล้ว (${check.used}/${check.limit} ครั้ง) — รีเซ็ตพรุ่งนี้`;
 }
 
-async function withAI(userId, replyToken, aiCall) {
+// true = ผ่าน; false = reply ปฏิเสธไปแล้ว (caller ต้อง return ทันที)
+async function aiGate(userId, replyToken) {
   const check = auth.canUseAI(userId);
-  if (!check.ok) return reply(replyToken, fmt.buildError(aiDenialMessage(check)));
-  // AI ล้มเหลว (ai.js throw หลัง retry ครบ) → แจ้ง user โดยไม่หัก quota
-  let result;
-  try {
-    result = await aiCall();
-  } catch (err) {
-    logger.warn(`withAI: AI ล้มเหลว ไม่หัก quota (userId=${userId}): ${err.message}`);
-    return reply(replyToken, fmt.buildError('AI ไม่ว่างในขณะนี้ กรุณาลองใหม่ในอีกสักครู่ (ไม่นับโควต้า)'));
+  if (check.ok) return true;
+  await reply(replyToken, fmt.buildError(aiDenialMessage(check)));
+  return false;
+}
+
+async function startAiJob(userId, replyToken, kind, job, ackText = AI_ACK_TEXT) {
+  // เช็ค+ล็อกต้องอยู่ก่อน await ตัวแรกเสมอ (JS single-thread) ไม่งั้นกดซ้ำเร็วๆ อาจลอดเข้ามาทั้งคู่
+  const startedAt = aiInFlight.get(userId);
+  if (startedAt && Date.now() - startedAt < AI_JOB_STALE_MS) {
+    return reply(replyToken, fmt.buildAiResponse(AI_BUSY_TEXT));
   }
+  const token = Date.now();
+  aiInFlight.set(userId, token);
+  // ปลดเฉพาะล็อกของรอบนี้ — job เก่าที่ค้างจน stale แล้วเพิ่งจบ ต้องไม่ลบล็อกของรอบใหม่
+  const release = () => { if (aiInFlight.get(userId) === token) aiInFlight.delete(userId); };
+
+  try {
+    await reply(replyToken, fmt.buildAiResponse(ackText));
+  } catch (err) {
+    release();
+    throw err;
+  }
+
+  // ไม่ await — ให้ webhook ตอบ LINE ได้ทันที; error ทุกกรณีถูกจัดการใน runAiJob แล้ว
+  // catch ตรงนี้เป็นแค่ตาข่ายสุดท้ายกัน unhandled rejection
+  runAiJob(userId, kind, job)
+    .catch((err) => logger.error(`aiJob[${kind}]: unexpected error userId=${userId}`, err))
+    .finally(release);
+}
+
+async function runAiJob(userId, kind, job) {
+  let flex;
+  try {
+    flex = await job();
+  } catch (err) {
+    if (err instanceof AiUserError) {
+      // ไม่ใช่ AI ล่ม (เช่น ไม่พบกล้อง) — แจ้งเหตุผลตรงๆ ไม่นับ quota
+      await push(userId, fmt.buildError(err.message), [], `aiJob[${kind}] user-error userId=${userId}`);
+      return;
+    }
+    // AI ล้มเหลว (ai.js throw หลัง retry ครบ) → แจ้ง user โดยไม่หัก quota
+    logger.warn(`aiJob[${kind}]: AI ล้มเหลว ไม่หัก quota (userId=${userId}): ${err.message}`);
+    await push(userId, fmt.buildError('AI ไม่ว่างในขณะนี้ กรุณาลองใหม่ในอีกสักครู่ (ไม่นับโควต้า)'), [],
+      `aiJob[${kind}] error-notice userId=${userId}`);
+    return;
+  }
+
   auth.incrementAIUsage(userId);
-  return result;
+  const sent = await push(userId, flex, [], `aiJob[${kind}] result userId=${userId}`);
+  if (!sent) {
+    // AI สำเร็จ (นับ quota แล้ว) แต่ส่งผลไม่ถึงผู้ใช้ — log ให้ชัดเพื่อ debug
+    logger.error(`aiJob[${kind}]: push ผลไม่สำเร็จ userId=${userId}`);
+  }
 }
 
 // ── Verify LINE Signature ──────────────────────────────────────────────────────
@@ -350,46 +415,10 @@ async function handlePostback(event) {
 }
 
 // ── AI วิเคราะห์รายอุปกรณ์ 2 layer — Layer 1 ตัว device, Layer 2 อุปกรณ์รอบข้าง ─
-// Flow: ตรวจสิทธิ์/quota → reply "กำลังวิเคราะห์..." ทันที (ใช้ replyToken ครั้งเดียว) →
-// วิเคราะห์ต่อแบบ async แล้วส่งผลด้วย push (ไม่ผูกกับ replyToken ที่หมดอายุเร็ว)
-// เพราะ AI ที่ช้า/retry อาจใช้ 30+ วินาที ซึ่ง replyToken หมดอายุไปก่อนแล้ว
-// analyzeInFlight: userId → เวลาที่เริ่มวิเคราะห์ (in-memory) กันกดปุ่มซ้ำระหว่างรอผลจนเรียก AI + นับโควตาซ้ำ
-// ปลดล็อกใน finally เสมอ; ANALYZE_STALE_MS กันกรณี AI ค้างไม่ตอบ (fetch ของ Gemini/OpenAI ไม่มี timeout)
-// ไม่ให้ user ถูกล็อกถาวรจนกว่าจะ restart bot
-const analyzeInFlight = new Map();
-const ANALYZE_STALE_MS = 3 * 60 * 1000;
-
+// Flow (ดู startAiJob): ตรวจสิทธิ์/quota → reply ack ทันที → วิเคราะห์ต่อแบบ async แล้ว push ผล
 async function handleAnalyze(data, userId, replyToken) {
-  const check = auth.canUseAI(userId);
-  if (!check.ok) return reply(replyToken, fmt.buildError(aiDenialMessage(check)));
+  if (!(await aiGate(userId, replyToken))) return;
 
-  // เช็ค+ล็อกต้องอยู่ก่อน await ตัวแรกเสมอ (JS single-thread) ไม่งั้นกดซ้ำเร็วๆ อาจลอดเข้ามาทั้งคู่
-  const startedAt = analyzeInFlight.get(userId);
-  if (startedAt && Date.now() - startedAt < ANALYZE_STALE_MS) {
-    return reply(replyToken, fmt.buildAiResponse('⏳ กำลังวิเคราะห์อยู่ กรุณารอสักครู่...'));
-  }
-  const token = Date.now();
-  analyzeInFlight.set(userId, token);
-  // ปลดเฉพาะล็อกของรอบนี้ — job เก่าที่ค้างจน stale แล้วเพิ่งจบ ต้องไม่ลบล็อกของรอบใหม่
-  const release = () => { if (analyzeInFlight.get(userId) === token) analyzeInFlight.delete(userId); };
-
-  try {
-    await reply(replyToken, fmt.buildAiResponse('🔍 กำลังวิเคราะห์ กรุณารอสักครู่...'));
-  } catch (err) {
-    release();
-    throw err;
-  }
-
-  // ไม่ await — ให้ webhook ตอบ LINE ได้ทันที; error ทุกกรณีถูกจัดการใน runAnalyze แล้ว
-  // catch ตรงนี้เป็นแค่ตาข่ายสุดท้ายกัน unhandled rejection
-  runAnalyze(data, userId)
-    .catch((err) => {
-      logger.error(`handleAnalyze: unexpected error userId=${userId} data="${data.slice(0, 80)}"`, err);
-    })
-    .finally(release);
-}
-
-async function runAnalyze(data, userId) {
   // data = "analyze:{type}:{name}:{ip}" — name อาจมี ":" จึงตัด segment แรก/สุดท้ายออก
   const parts = data.split(':');
   const type  = parts[1] || '';
@@ -397,8 +426,7 @@ async function runAnalyze(data, userId) {
   const name  = parts.slice(2, parts.length > 3 ? -1 : undefined).join(':') || '-';
   const ip    = rawIp && rawIp !== '-' && rawIp !== 'N/A' ? rawIp : null;
 
-  let analysis;
-  try {
+  return startAiJob(userId, replyToken, `analyze:${type}`, async () => {
     const ctx = await gatherAnalyzeContext(type, name, ip);
 
     const prompt = `คุณเป็น Network Engineer วิเคราะห์ปัญหาของ ${name} (${type})${ip ? ` IP ${ip}` : ''}
@@ -412,21 +440,9 @@ AP ที่เกี่ยวข้อง: ${ctx.apContext}
 ถ้าหลายอุปกรณ์มีปัญหาพร้อมกัน ให้ระบุว่าน่าจะเป็นปัญหาระดับ network/switch`;
 
     // 800 tokens — วิเคราะห์รายอุปกรณ์มี context 2 layer คำตอบยาวกว่า chat ปกติ (500)
-    analysis = await ai.chat(prompt, null, 800);
-  } catch (err) {
-    // AI ล้มเหลว (ai.js throw หลัง retry ครบ) → แจ้ง user โดยไม่หัก quota (เหมือน withAI เดิม)
-    logger.warn(`runAnalyze: AI ล้มเหลว ไม่หัก quota (userId=${userId} type=${type}): ${err.message}`);
-    await push(userId, fmt.buildError('AI ไม่ว่างในขณะนี้ กรุณาลองใหม่ในอีกสักครู่ (ไม่นับโควต้า)'), [],
-      `runAnalyze error notice (userId=${userId} type=${type})`);
-    return;
-  }
-
-  auth.incrementAIUsage(userId);
-  const sent = await push(userId, fmt.buildAiResponse(analysis), [], `runAnalyze result (userId=${userId} type=${type})`);
-  if (!sent) {
-    // วิเคราะห์สำเร็จ (นับ quota แล้ว) แต่ส่งผลไม่ถึงผู้ใช้ — log ให้ชัดเพื่อ debug
-    logger.error(`runAnalyze: push ผลวิเคราะห์ไม่สำเร็จ userId=${userId} type=${type} name="${name}"`);
-  }
+    const analysis = await ai.chat(prompt, null, 800);
+    return fmt.buildAiResponse(analysis);
+  });
 }
 
 // เทียบ /24 subnet เดียวกัน เช่น 192.168.1.10 กับ 192.168.1.99
@@ -745,89 +761,98 @@ async function route(text, rawText, userId, replyToken) {
   }
 
   if (text.startsWith('วิเคราะห์')) {
-    return withAI(userId, replyToken, async () => {
-      const subCmd = rawText.replace(/^วิเคราะห์\s*/i, '').trim().toLowerCase();
+    if (!(await aiGate(userId, replyToken))) return;
+    const subCmd = rawText.replace(/^วิเคราะห์\s*/i, '').trim().toLowerCase();
 
-      // "วิเคราะห์กล้อง CAM-xxx" — วิเคราะห์กล้องรายตัว
-      const camIdMatch = subCmd.match(/^กล้อง\s+(cam-\d+)/i);
-      if (camIdMatch) {
-        const camId   = camIdMatch[1].toUpperCase();
+    // กรณีที่ต้องมี context จากคำสั่งก่อนหน้า: ไม่มี/หมดอายุ → error ทันที (เร็ว ไม่เรียก AI ไม่นับ quota)
+    // มี context → ack ทันทีแล้วให้ AI ทำงานเบื้องหลัง (startAiJob) — maxTokens คงตามค่าเดิมของแต่ละ ai.* เรียก
+    const freshCtx = (map) => {
+      const c = map.get(userId);
+      return c && Date.now() - c.setAt < CONTEXT_TTL_MS ? c : null;
+    };
+
+    // "วิเคราะห์กล้อง CAM-xxx" — วิเคราะห์กล้องรายตัว
+    // ดึงกล้อง (HikCentral อาจช้า ~10 วิ) อยู่ใน job หลัง ack — ไม่ให้ ack ช้าตาม
+    const camIdMatch = subCmd.match(/^กล้อง\s+(cam-\d+)/i);
+    if (camIdMatch) {
+      const camId = camIdMatch[1].toUpperCase();
+      return startAiJob(userId, replyToken, 'วิเคราะห์-กล้องรายตัว', async () => {
         const cameras = await getCamerasWithCache();
         const cam     = cameras.find(c => String(c.name || c.id || '').toUpperCase() === camId);
-        if (!cam) return reply(replyToken, fmt.buildError(`ไม่พบข้อมูลกล้อง ${camId}`));
+        if (!cam) throw new AiUserError(`ไม่พบข้อมูลกล้อง ${camId}`);
         const ctx      = `กล้อง ${cam.name} ตำแหน่ง ${cam.location || '-'} สถานะ ${cam.status} ดับมา ${cam.duration || '-'} ตั้งแต่ ${cam.offlineSince || 'N/A'}`;
         const analysis = await ai.chat(`วิเคราะห์ปัญหากล้อง CCTV รายตัว บอกสาเหตุที่น่าจะเป็นและวิธีแก้ไข:\n${ctx}`);
-        return reply(replyToken, fmt.buildAiResponse(analysis));
-      }
+        return fmt.buildAiResponse(analysis);
+      });
+    }
 
-      // "วิเคราะห์กล้อง" หรือ "วิเคราะห์"
-      if (subCmd === 'กล้อง' || subCmd === '') {
-        const ctx = userLastCameraCtx.get(userId);
-        if (ctx && Date.now() - ctx.setAt < CONTEXT_TTL_MS) {
-          const analysis = await ai.chat(`วิเคราะห์ปัญหากล้อง CCTV ต่อไปนี้ บอกสาเหตุที่เป็นไปได้ วิธีแก้ไข และวิธีป้องกัน:\n${ctx.text}`);
-          return reply(replyToken, fmt.buildAiResponse(analysis));
-        }
-        return reply(replyToken, fmt.buildError('ไม่มีข้อมูลกล้องล่าสุด — กรุณาพิมพ์ "กล้องดับ" ก่อน'));
-      }
+    // "วิเคราะห์กล้อง" หรือ "วิเคราะห์"
+    if (subCmd === 'กล้อง' || subCmd === '') {
+      const ctx = freshCtx(userLastCameraCtx);
+      if (!ctx) return reply(replyToken, fmt.buildError('ไม่มีข้อมูลกล้องล่าสุด — กรุณาพิมพ์ "กล้องดับ" ก่อน'));
+      return startAiJob(userId, replyToken, 'วิเคราะห์-กล้อง', async () => {
+        const analysis = await ai.chat(`วิเคราะห์ปัญหากล้อง CCTV ต่อไปนี้ บอกสาเหตุที่เป็นไปได้ วิธีแก้ไข และวิธีป้องกัน:\n${ctx.text}`);
+        return fmt.buildAiResponse(analysis);
+      });
+    }
 
-      // "วิเคราะห์ alert"
-      if (subCmd === 'alert' || subCmd === 'alerts') {
-        const ctx = userLastAlertCtx.get(userId);
-        if (ctx && Date.now() - ctx.setAt < CONTEXT_TTL_MS) {
-          const top      = ctx.problems[0] || { description: 'ไม่มี alert', host: 'N/A', priorityLabel: 'N/A', lastChange: 'N/A', comments: '' };
-          const analysis = await ai.analyzeAlert(top);
-          return reply(replyToken, fmt.buildAiResponse(analysis));
-        }
-        return reply(replyToken, fmt.buildError('ไม่มีข้อมูล alert ล่าสุด — กรุณาพิมพ์ "alert" ก่อน'));
-      }
+    // "วิเคราะห์ alert"
+    if (subCmd === 'alert' || subCmd === 'alerts') {
+      const ctx = freshCtx(userLastAlertCtx);
+      if (!ctx) return reply(replyToken, fmt.buildError('ไม่มีข้อมูล alert ล่าสุด — กรุณาพิมพ์ "alert" ก่อน'));
+      const top = ctx.problems[0] || { description: 'ไม่มี alert', host: 'N/A', priorityLabel: 'N/A', lastChange: 'N/A', comments: '' };
+      return startAiJob(userId, replyToken, 'วิเคราะห์-alert', async () => {
+        const analysis = await ai.analyzeAlert(top);
+        return fmt.buildAiResponse(analysis);
+      });
+    }
 
-      // "วิเคราะห์ host"
-      if (subCmd === 'host' || subCmd === 'hosts') {
-        const ctx = userLastHostCtx.get(userId);
-        if (ctx && Date.now() - ctx.setAt < CONTEXT_TTL_MS) {
-          const analysis = await ai.chat(`วิเคราะห์สถานะ Host ต่อไปนี้ บอกสาเหตุที่เป็นไปได้และวิธีแก้ไข:\n${ctx.text}`);
-          return reply(replyToken, fmt.buildAiResponse(analysis));
-        }
-        return reply(replyToken, fmt.buildError('ไม่มีข้อมูล host ล่าสุด — กรุณาพิมพ์ "host" ก่อน'));
-      }
+    // "วิเคราะห์ host"
+    if (subCmd === 'host' || subCmd === 'hosts') {
+      const ctx = freshCtx(userLastHostCtx);
+      if (!ctx) return reply(replyToken, fmt.buildError('ไม่มีข้อมูล host ล่าสุด — กรุณาพิมพ์ "host" ก่อน'));
+      return startAiJob(userId, replyToken, 'วิเคราะห์-host', async () => {
+        const analysis = await ai.chat(`วิเคราะห์สถานะ Host ต่อไปนี้ บอกสาเหตุที่เป็นไปได้และวิธีแก้ไข:\n${ctx.text}`);
+        return fmt.buildAiResponse(analysis);
+      });
+    }
 
-      // "วิเคราะห์ wifi"
-      if (subCmd === 'wifi') {
-        const ctx = userLastWifiCtx.get(userId);
-        if (ctx && Date.now() - ctx.setAt < CONTEXT_TTL_MS) {
-          const analysis = await ai.chat(`วิเคราะห์สถานะ WiFi AP ต่อไปนี้ บอกสาเหตุที่เป็นไปได้และวิธีแก้ไข:\n${ctx.text}`);
-          return reply(replyToken, fmt.buildAiResponse(analysis));
-        }
-        return reply(replyToken, fmt.buildError('ไม่มีข้อมูล WiFi ล่าสุด — กรุณาพิมพ์ "wifi" ก่อน'));
-      }
+    // "วิเคราะห์ wifi"
+    if (subCmd === 'wifi') {
+      const ctx = freshCtx(userLastWifiCtx);
+      if (!ctx) return reply(replyToken, fmt.buildError('ไม่มีข้อมูล WiFi ล่าสุด — กรุณาพิมพ์ "wifi" ก่อน'));
+      return startAiJob(userId, replyToken, 'วิเคราะห์-wifi', async () => {
+        const analysis = await ai.chat(`วิเคราะห์สถานะ WiFi AP ต่อไปนี้ บอกสาเหตุที่เป็นไปได้และวิธีแก้ไข:\n${ctx.text}`);
+        return fmt.buildAiResponse(analysis);
+      });
+    }
 
-      // "วิเคราะห์ summary"
-      if (subCmd === 'summary' || subCmd === 'ทั้งหมด' || subCmd === 'สรุป') {
-        const ctx = userLastSummaryCtx.get(userId);
-        if (ctx && Date.now() - ctx.setAt < CONTEXT_TTL_MS) {
-          const analysis = await ai.chat(`วิเคราะห์ภาพรวมระบบ IT ต่อไปนี้ บอกสถานการณ์ปัจจุบันและคำแนะนำ:\n${ctx.text}`);
-          return reply(replyToken, fmt.buildAiResponse(analysis));
-        }
-        return reply(replyToken, fmt.buildError('ไม่มีข้อมูลสรุปล่าสุด — กรุณาพิมพ์ "ทั้งหมด" ก่อน'));
-      }
+    // "วิเคราะห์ summary"
+    if (subCmd === 'summary' || subCmd === 'ทั้งหมด' || subCmd === 'สรุป') {
+      const ctx = freshCtx(userLastSummaryCtx);
+      if (!ctx) return reply(replyToken, fmt.buildError('ไม่มีข้อมูลสรุปล่าสุด — กรุณาพิมพ์ "ทั้งหมด" ก่อน'));
+      return startAiJob(userId, replyToken, 'วิเคราะห์-summary', async () => {
+        const analysis = await ai.chat(`วิเคราะห์ภาพรวมระบบ IT ต่อไปนี้ บอกสถานการณ์ปัจจุบันและคำแนะนำ:\n${ctx.text}`);
+        return fmt.buildAiResponse(analysis);
+      });
+    }
 
-      // "วิเคราะห์ cross" — AI วิเคราะห์ Cross-System Correlation (on-demand)
-      if (subCmd === 'cross' || subCmd === 'correlation' || subCmd === 'ข้ามระบบ' || subCmd === 'สหสัมพันธ์') {
-        const ctx = userLastCorrCtx.get(userId);
-        if (ctx && Date.now() - ctx.setAt < CONTEXT_TTL_MS) {
-          if (!ctx.groups.length) {
-            return reply(replyToken, fmt.buildError('ไม่พบกลุ่มที่น่ากังวล — กรุณาพิมพ์ "cross" ก่อน'));
-          }
-          const analysis = await ai.analyzeCorrelation(ctx.groups[0]);
-          return reply(replyToken, fmt.buildAiResponse(analysis));
-        }
-        return reply(replyToken, fmt.buildError('ไม่มีข้อมูล cross-system ล่าสุด — กรุณาพิมพ์ "cross" ก่อน'));
-      }
+    // "วิเคราะห์ cross" — AI วิเคราะห์ Cross-System Correlation (on-demand)
+    if (subCmd === 'cross' || subCmd === 'correlation' || subCmd === 'ข้ามระบบ' || subCmd === 'สหสัมพันธ์') {
+      const ctx = freshCtx(userLastCorrCtx);
+      if (!ctx) return reply(replyToken, fmt.buildError('ไม่มีข้อมูล cross-system ล่าสุด — กรุณาพิมพ์ "cross" ก่อน'));
+      if (!ctx.groups.length) return reply(replyToken, fmt.buildError('ไม่พบกลุ่มที่น่ากังวล — กรุณาพิมพ์ "cross" ก่อน'));
+      return startAiJob(userId, replyToken, 'วิเคราะห์-cross', async () => {
+        const analysis = await ai.analyzeCorrelation(ctx.groups[0]);
+        return fmt.buildAiResponse(analysis);
+      });
+    }
 
-      // "วิเคราะห์ <ข้อความ>" — วิเคราะห์โดยตรง
-      const fakeAlert = { description: rawText.replace(/^วิเคราะห์\s*/i, '').trim(), host: 'N/A', priorityLabel: 'N/A', lastChange: 'N/A', comments: '' };
-      const analysis  = await ai.analyzeAlert(fakeAlert);
-      return reply(replyToken, fmt.buildAiResponse(analysis));
+    // "วิเคราะห์ <ข้อความ>" — วิเคราะห์โดยตรง
+    const fakeAlert = { description: rawText.replace(/^วิเคราะห์\s*/i, '').trim(), host: 'N/A', priorityLabel: 'N/A', lastChange: 'N/A', comments: '' };
+    return startAiJob(userId, replyToken, 'วิเคราะห์-ข้อความ', async () => {
+      const analysis = await ai.analyzeAlert(fakeAlert);
+      return fmt.buildAiResponse(analysis);
     });
   }
 
@@ -1204,14 +1229,16 @@ async function route(text, rawText, userId, replyToken) {
     }
 
     default: {
-      return withAI(userId, replyToken, async () => {
+      if (!(await aiGate(userId, replyToken))) return;
+      // ดึง Zabbix context (อาจช้า) อยู่ใน job หลัง ack
+      return startAiJob(userId, replyToken, 'chat', async () => {
         let context = null;
         if (zabbix) {
           try { context = await zabbix.getProblems(5); } catch { /* ไม่มีผลกับ AI */ }
         }
         const answer = await ai.chat(rawText, context);
-        return reply(replyToken, fmt.buildAiResponse(answer));
-      });
+        return fmt.buildAiResponse(answer);
+      }, '💬 กำลังคิดคำตอบ กรุณารอสักครู่...');
     }
   }
 }
