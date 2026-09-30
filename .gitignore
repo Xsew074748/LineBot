@@ -29,3 +29,6 @@ Thumbs.db
 .claude/
 .env
 pm2/
+
+# ── ผลการทดลองเปรียบเทียบ AI (คำตอบ AI + mapping ป้าย↔provider — อย่า commit จนให้คะแนนเสร็จ) ──
+ai-comparison/results/

@@ -142,3 +142,87 @@ node ai-comparison/tools/render-prompt.js NET-01   # ดู prompt ที่จ�
 - **ห้ามแก้เฉลยหลังเห็นคำตอบ AI ใดๆ** (ตอน commit ให้บันทึก hash ของเฉลยที่ freeze ก่อนรัน)
 - ห้ามแก้โค้ด production เพื่อการทดลองนี้ (โฟลเดอร์นี้อ่านซอร์สบอทเพื่ออ้างอิงเท่านั้น)
 - ทุกการรันที่เสีย API credit ต้องได้รับการยืนยันก่อน
+
+
+---
+
+# ขั้นที่ 2: pipeline รันจริง (mock-lab → บอท → AI 3 เจ้า)
+
+> สถานะ: สร้างและทดสอบ pipeline แล้ว (dry-run ครบ 34 เคส + ทดสอบกับ AI จริง 3 เคส) — **ยังไม่ได้รันเต็ม 34 เคส**
+> เฉลย (`scenarios/*.yaml`) freeze ที่ commit `4543d3b` ก่อนเรียก AI ตัวใด
+
+## ภาพรวม
+
+```
+mock-lab/scenarios/cmp-<เคส>.yaml ──▶ mock-lab (Zabbix+Omada+HikCentral จำลอง, พอร์ตสุ่มในโปรเซสเดียวกัน)
+        ▲                                   │  HTTP loopback (บอทเรียก API จริง)
+pipeline.yaml (เคส → สถานการณ์ + เส้นทาง)      ▼
+                                   service/adapter/config/correlate/ai ของบอทจริง (env ชี้ไป mock)
+                                   + ฟังก์ชันจาก index.js (ตัดซอร์สด้วย AST — ไม่คัดลอก)
+                                                │  prompt เดียวกับบอทจริง
+                                                ▼
+                            Claude / Gemini / GPT (services/ai-providers/*.js จริง, retry/timeout เหมือน production)
+                                                │
+                     results/raw/<เคส>.json  (คำตอบติดป้าย A/B/C — ไม่มีชื่อ provider)
+                     results/mapping.json    (ป้าย↔provider — ห้ามเปิดจนให้คะแนนเสร็จ)
+                     results/review.html     (หน้าให้คะแนน สุ่มลำดับเคส ไม่มีชื่อ provider)
+```
+
+## วิธีรัน
+
+```bash
+node ai-comparison/tools/run-comparison.js --dry-run --show   # ประกอบ prompt ทุกเคส พิมพ์ให้ดู (ไม่เรียก AI ไม่เสียเงิน)
+node ai-comparison/tools/run-comparison.js --cases NET-01,CAS-02   # เฉพาะบางเคส (เรียก AI จริง)
+node ai-comparison/tools/run-comparison.js --confirm-full          # ครบ 34 เคส × 3 provider = 102 ครั้ง (ต้องมีธงนี้ เพราะเสียเงิน)
+node ai-comparison/tools/make-review.js                            # สร้าง results/review.html
+```
+ตัวเลือก: `--providers claude,gemini,openai` · `--force` (รันเคสที่มีผลแล้วซ้ำ; ปกติข้ามเพื่อรันต่อจากที่ค้างได้) · ต้องมี API key ใน `.env` (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`)
+
+- เคสเดียวล้ม (เช่น provider ตอบ 503 ครบ 3 ครั้ง) ไม่ทำให้ทั้ง run พัง — บันทึกเป็น "ไม่มีคำตอบ" และรันเคสนั้นซ้ำด้วย `--cases <id> --force` ได้
+- provider ถูกเรียกผ่าน `complete()` ตัวเดียวกับที่บอทใช้ (retry 3 ครั้งพร้อม backoff, timeout 45 วินาที) — ผลจึงรวม "ความพร้อมใช้งาน" ของแต่ละเจ้าไว้ด้วย
+- ถ้าซอร์สบอท (`index.js`) เปลี่ยนจน prompt/สูตร context ที่เขียนซ้ำไม่ตรงกับของจริง runner จะหยุดพร้อมบอกจุดที่ drift (`checkDrift`)
+
+## เหตุผลการออกแบบ
+
+| เรื่อง | ตัดสินใจ | เหตุผล |
+|---|---|---|
+| เริ่ม mock ต่อเคส | สลับสถานการณ์ในโปรเซสเดียวกัน (`holder.state`) แทนการ spawn `node mock-lab/server.js` 34 ครั้ง | เร็วกว่า (ไม่รอ process/พอร์ต) ควบคุมได้ตรง; บอทยังคุยกับ mock ผ่าน HTTP จริง จึงไม่ต่างจากรันแยก |
+| ตรรกะ context ของบอท | ตัดฟังก์ชันจาก `index.js` ด้วย AST (`@babel/parser`) รันใน sandbox | `index.js` เปิดเซิร์ฟเวอร์ตอน import จึง require ไม่ได้ และไม่ต้อง copy โค้ด → ตรงกับ production เสมอ; ส่วนที่เขียน inline ใน route (ข้อความ context ของ host/wifi/กล้อง/summary, prompt ปุ่มวิเคราะห์) เขียนซ้ำและมี drift check |
+| prompt จริงของ AI | เรียก `services/ai.js` จริงผ่าน provider จำลองที่ "ดักจับ" prompt | ได้ system/user prompt และ max_tokens ที่ตรงตัวอักษร แล้วส่ง prompt เดียวกันไปทั้ง 3 เจ้า |
+| ปกปิดชื่อ | สุ่มป้าย A/B/C ต่อเคสด้วย `crypto.randomInt`; ป้าย↔provider อยู่แยกใน `mapping.json` | `raw/*.json` และ `review.html` ไม่มีชื่อ provider (ตรวจแล้ว) |
+| ผลลัพธ์ | `results/` อยู่ใน `.gitignore` | มีคำตอบ AI และ mapping; ให้ commit เองเมื่อให้คะแนนเสร็จ (`git add -f`) |
+
+## สิ่งที่ pipeline ต่างจากเคสที่เขียนด้วยมือ (ต้องระบุในเล่ม)
+
+จากการทำให้บอทดึงข้อมูลจริงผ่าน mock พบว่าตรรกะของบอทจำกัดข้อมูลที่ AI ได้รับ เคสจึงถูกจัดเป็น 3 กลุ่ม:
+
+### ก. ประกอบจากสถานะอุปกรณ์ล้วนๆ (15 เคส) — ไม่มีข้อความเสริม
+`NET-01, NET-02, NET-03, NET-04, CAM-01, CAM-03, CAM-04, CAM-05, CAS-01, CAS-02, CAS-03, CAS-04, CAS-05, CAS-06, CON-01`
+ข้อความ context ที่ AI เห็นเกิดจากสถานะอุปกรณ์ใน mock ที่ผ่านฟังก์ชันจริงของบอท (เช่น ลูกโซ่จาก `depends_on`, ระยะเวลาดับจาก `down_since`, ตำแหน่งกล้องจาก `location`)
+
+### ข. ต้นตอ/หลักฐานเชิงละเอียดอยู่ใน `comments` ของ alert (19 เคส) — ยังพึ่งข้อความเสริม
+`NET-05, CAM-02, HOST-01..05, FLAP-01..04, FAL-01..05, CON-02, CON-03, CON-04`
+prompt `analyzeAlert` ของบอทมีข้อความอิสระเพียงฟิลด์ `comments` และบอทจริงยังไม่ได้ส่งค่าที่วัดได้/ประวัติให้ AI ดังนั้นค่าเหล่านี้ (SMART, RAID, ประวัติ flapping, ARP, PoE watt, baseline 30 วัน ฯลฯ) เขียนไว้ใน `alerts[].comments` ของไฟล์ `cmp-*.yaml` เอง
+- สถานะอุปกรณ์/`priority`/เวลา/ชื่อ host ยังมาจาก pipeline จริง; `metrics` ของ mock ตรงกับตัวเลขใน comments (HOST-01..04, FAL-02, CON-02) และอ่านได้ผ่าน `metric` แต่ **ไม่ถูกส่งให้ AI** โดยบอทปัจจุบัน
+- mock-lab **จำลองไม่ได้**: SMART/RAID (HOST-05), ARP/MAC (FLAP-03), PoE budget (FLAP-02), CRC/แสงไฟเบอร์ (FLAP-01), ประวัติ 8–14 วัน (FAL-02..04), maintenance period (FAL-01), uplink ไร้สายของ AP (CON-03), ping loss/fps (CON-04) — ทั้งหมดอยู่ใน comments
+- **ไม่ใช้ `flap:` แบบเวลาจริงกับเคส flapping** เพราะทำให้ผลไม่คงที่ระหว่างการรัน (flapping ถูกบรรยายใน comments แทน; ฟีเจอร์ flap ยังมีสำหรับทดสอบบอทเอง)
+
+### ค. เส้นทางต่างจากเจตนาเดิมของเคสด้วยเหตุผลของบอท
+| เคส | ที่ต่าง | เหตุผล |
+|---|---|---|
+| CAM-04, CAM-05 | ใช้เส้นทาง "กล้องดับ → วิเคราะห์กล้อง" (context หลายกล้องพร้อมระยะเวลา/ตำแหน่ง) แทน "วิเคราะห์กล้อง CAM-xxx" | เส้นทางรายตัวของบอทไม่มีข้อมูลระยะเวลา (แสดง `ดับมา - ตั้งแต่ N/A`) ซึ่งเป็นหลักฐานหลักของเฉลย |
+| CAS-06 | ข้ามตัวกรอง "เฉพาะกลุ่ม high" (`include_medium`) | บอทจริงส่งเฉพาะกลุ่ม high ให้ AI; เคสนี้ตั้งใจทดสอบกลุ่ม medium |
+| CAS-01,02,03,06 | ชื่ออุปกรณ์/โซนต่างจากเฉลย (ตาราง name_map ด้านล่าง) | บอทจัดกลุ่มตามชื่อ (Zabbix) และชื่อพื้นที่ (HikCentral) — ชื่อเดิมไม่ทำให้เกิดกลุ่มเดียวกัน; อุปกรณ์ Omada ไม่เข้าการจัดกลุ่มเลย (โซน "ไม่ระบุ") จึงต้องสะท้อน AP เข้า Zabbix |
+| ทุกเคสที่มีเวลา | เวลาใน correlation (`เวลาเริ่ม`) เป็นเวลาที่รันจริง | บอทเลือกเฉพาะเหตุการณ์ใน 5 นาทีล่าสุด; เวลาใน alert (`lastChange`) เป็นเวลาคงที่ตามเฉลย |
+
+**name_map (เฉลยเดิม → ใน mock):**
+CAS-01: โซน `ชั้น 2`→`FL2-A`, `SW-FL2-01`→`FL2-A-SW01`, `AP-FL2-01/02`→`FL2-A-AP-01/02`, `HQ-CAM-201..205`→`FL2-A-CAM201..205` ·
+CAS-02: `ชั้น 3`→`FL3-A`, `AP-FL3-01/02`→`FL3-A-AP-01/02`, `HQ-CAM-301..304`→`FL3-A-CAM301..304` (switch ต้นตอไม่อยู่ในข้อมูลตามเจตนา) ·
+CAS-03: `อาคาร B`→`B-1`, `SRV-B-01/02`→`B-1-SRV01/02`, `B-CAM-01..04`→`B-1-CAM01..04`, `AP-B-01..03`→`B-1-AP-01..03` ·
+CAS-06: `ลานจอดรถชั่วคราว`→`PK-T`, `PLANT-CAM-061..066`→`PK-T-CAM01..06`
+(ผู้ให้คะแนนเทียบตามบทบาทของอุปกรณ์ ไม่ใช่ชื่อตัวอักษร; ชื่อที่ไม่มีอยู่ในข้อมูลยังนับเป็น hallucination)
+
+## ข้อจำกัดที่พบตอนสร้าง pipeline
+
+- ตอนทดสอบ end-to-end (3 เคส) ต้องมี **API key ที่ใช้ได้ครบทั้ง 3 เจ้า** ก่อนรันเต็ม: ตอนทดสอบ Claude ตอบ 401 (key ไม่ถูกต้อง), OpenAI ไม่มี key, Gemini ตอบ 503 (ความต้องการสูง) และ 429 (เกินโควตา) ในบางครั้ง
+- คำตอบที่ provider ล้มเหลวถูกให้ 0/0/0 อัตโนมัติในหน้า review (RUBRIC กฎข้อ 6) — ควรรันซ้ำจนได้คำตอบก่อนให้คะแนนเพื่อไม่ให้ความล้มเหลวชั่วคราวกลายเป็นข้อเสียเปรียบของ provider ใด

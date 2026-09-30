@@ -1,0 +1,39 @@
+# ตารางเชื่อม "เคสใน ai-comparison/scenarios/*.yaml" → "สถานการณ์ mock-lab" + เส้นทางที่บอทใช้ประกอบ prompt
+# (ไม่แก้ไฟล์เฉลยเดิม — เพิ่มไฟล์นี้แยกต่างหาก)
+#
+# path: analyze_device | alert | cross | camera_off | ctx_host | ctx_wifi | ctx_camera | ctx_summary  (ดู tools/bot-context.js)
+
+NET-01: {scenario: cmp-NET-01.yaml, path: analyze_device, select: {type: "ap", name: "AP-Lobby-01"}}
+NET-02: {scenario: cmp-NET-02.yaml, path: ctx_wifi}
+NET-03: {scenario: cmp-NET-03.yaml, path: ctx_wifi}
+NET-04: {scenario: cmp-NET-04.yaml, path: analyze_device, select: {type: "ap", name: "AP-FL3-02"}}
+NET-05: {scenario: cmp-NET-05.yaml, path: alert, select: {host: "AP-WH-Spare-02", descriptionIncludes: "Disconnected"}}
+CAM-01: {scenario: cmp-CAM-01.yaml, path: analyze_device, select: {type: "camera", name: "HQ-CAM-012"}}
+CAM-02: {scenario: cmp-CAM-02.yaml, path: alert, select: {host: "HQ-CAM-007", descriptionIncludes: "Video signal lost"}}
+CAM-03: {scenario: cmp-CAM-03.yaml, path: ctx_camera}
+CAM-04: {scenario: cmp-CAM-04.yaml, path: camera_off}
+CAM-05: {scenario: cmp-CAM-05.yaml, path: camera_off}
+HOST-01: {scenario: cmp-HOST-01.yaml, path: alert, select: {host: "SRV-APP-01", descriptionIncludes: "High CPU"}}
+HOST-02: {scenario: cmp-HOST-02.yaml, path: alert, select: {host: "SRV-DB-01", descriptionIncludes: "memory"}}
+HOST-03: {scenario: cmp-HOST-03.yaml, path: alert, select: {host: "SRV-WEB-02", descriptionIncludes: "Free disk space"}}
+HOST-04: {scenario: cmp-HOST-04.yaml, path: alert, select: {host: "SRV-FILE-02", descriptionIncludes: "Free disk space"}}
+HOST-05: {scenario: cmp-HOST-05.yaml, path: alert, select: {host: "SRV-FILE-01", descriptionIncludes: "I/O wait"}}
+FLAP-01: {scenario: cmp-FLAP-01.yaml, path: alert, select: {host: "SW-FL2-01", descriptionIncludes: "Gi0/24"}}
+FLAP-02: {scenario: cmp-FLAP-02.yaml, path: alert, select: {host: "AP-Meeting-03", descriptionIncludes: "สลับสถานะ"}}
+FLAP-03: {scenario: cmp-FLAP-03.yaml, path: alert, select: {host: "HQ-CAM-021", descriptionIncludes: "สลับกัน"}}
+FLAP-04: {scenario: cmp-FLAP-04.yaml, path: alert, select: {host: "SRV-PRINT-01", descriptionIncludes: "ICMP"}}
+CAS-01: {scenario: cmp-CAS-01.yaml, path: cross}
+CAS-02: {scenario: cmp-CAS-02.yaml, path: cross}
+CAS-03: {scenario: cmp-CAS-03.yaml, path: cross}
+CAS-04: {scenario: cmp-CAS-04.yaml, path: analyze_device, select: {type: "host", name: "SRV-NVR-01"}}
+CAS-05: {scenario: cmp-CAS-05.yaml, path: ctx_summary}
+CAS-06: {scenario: cmp-CAS-06.yaml, path: cross, select: {include_medium: true}}
+FAL-01: {scenario: cmp-FAL-01.yaml, path: alert, select: {host: "SRV-APP-02", descriptionIncludes: "ICMP"}}
+FAL-02: {scenario: cmp-FAL-02.yaml, path: alert, select: {host: "SRV-BACKUP-01", descriptionIncludes: "CPU"}}
+FAL-03: {scenario: cmp-FAL-03.yaml, path: alert, select: {host: "PLANT-CAM-044", descriptionIncludes: "ออฟไลน์"}}
+FAL-04: {scenario: cmp-FAL-04.yaml, path: alert, select: {host: "SW-CORE-01", descriptionIncludes: "bandwidth"}}
+FAL-05: {scenario: cmp-FAL-05.yaml, path: alert, select: {host: "SENSOR-SVRROOM-01", descriptionIncludes: "temperature"}}
+CON-01: {scenario: cmp-CON-01.yaml, path: analyze_device, select: {type: "host", name: "SRV-NVR-02"}}
+CON-02: {scenario: cmp-CON-02.yaml, path: alert, select: {host: "SRV-WEB-03", descriptionIncludes: "ICMP"}}
+CON-03: {scenario: cmp-CON-03.yaml, path: alert, select: {host: "SW-FL1-01", descriptionIncludes: "Gi0/7"}}
+CON-04: {scenario: cmp-CON-04.yaml, path: alert, select: {host: "HQ-CAM-030", descriptionIncludes: "ICMP loss"}}
