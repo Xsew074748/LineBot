@@ -1,0 +1,7 @@
+# สถานการณ์ลูกโซ่: switch ชั้น 2 ล่ม 12 นาทีที่แล้ว → AP 2 ตัว + กล้อง 5 ตัวของชั้น 2 หลุดตามอัตโนมัติ (depends_on)
+# ทดสอบ: correlation "ข้ามระบบ" / วิเคราะห์ระดับต้นตอ (ตรงกับเคส CAS-01 ในชุดเปรียบเทียบ AI)
+name: "Switch ชั้น 2 ล่ม (ลูกโซ่)"
+description: "SW-FL2-01 down → AP-FL2-01/02 และ HQ-CAM-201..205 ออฟไลน์ตามเป็นผลพวง"
+extends: 01-baseline-office.yaml
+patch:
+  - {name: SW-FL2-01, set: {status: down, down_since: "-12m"}}

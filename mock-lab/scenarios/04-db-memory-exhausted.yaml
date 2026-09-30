@@ -1,0 +1,13 @@
+# host ทรัพยากรเกิน: DB หน่วยความจำหมด + CPU สูง (ตรงกับ HOST-02) — trigger สร้างอัตโนมัติจาก metrics
+# และเพิ่ม alert ที่กำหนดเองพร้อมค่าที่วัดได้ใน comments
+name: "DB หน่วยความจำหมด (OOM)"
+description: "SRV-DB-01 memory 97.9% + alert OOM-killer"
+extends: 01-baseline-office.yaml
+patch:
+  - {name: SRV-DB-01, set: {metrics: {cpu: 76, memory_used: 97.9, disk_used: 57}}}
+alerts:
+  - host: SRV-DB-01
+    description: "Lack of available memory (<10% of total) — OOM killer invoked"
+    priority: 5
+    since: "-8m"
+    comments: "หน่วยความจำว่าง 2.1%, swap ใช้ 96%; mysqld RSS 28 GB จาก 32 GB; OOM-killer ทำงาน 2 ครั้งใน 1 ชั่วโมง; connection ปัจจุบัน 1,850 (ปกติ ~300)"

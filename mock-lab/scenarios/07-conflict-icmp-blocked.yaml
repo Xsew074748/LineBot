@@ -1,0 +1,7 @@
+# ข้อมูลขัดแย้ง: Zabbix (ICMP) เห็น web server ล่ม แต่ระบบอื่น/agent เห็นปกติ (ตรงกับ CON-02)
+# zabbix_status ทับเฉพาะ "สิ่งที่ Zabbix เห็น" — ตัวเครื่องยังทำงาน (status: up)
+name: "ICMP ถูก firewall บล็อก (Zabbix เห็นล่ม แต่ปกติ)"
+description: "SRV-WEB-01 zabbix_status=down ทั้งที่ status=up"
+extends: 01-baseline-office.yaml
+patch:
+  - {name: SRV-WEB-01, set: {zabbix_status: down, down_since: "-6m", comments: "Zabbix Agent ยังส่งข้อมูล; external monitor ตอบ HTTP 200; เปลี่ยน firewall rule เมื่อ 5 นาทีก่อน (CHG-2305)"}}

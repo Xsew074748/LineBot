@@ -1,0 +1,12 @@
+# ดิสก์เสื่อม RAID5 degraded (ตรงกับ HOST-05) — เพิ่ม file server ที่ไม่มีในฐาน และ alert I/O wait สูง
+name: "File server ดิสก์เสื่อม RAID degraded"
+description: "SRV-FILE-01 iowait สูง + SMART reallocated เพิ่ม + RAID5 degraded"
+extends: 01-baseline-office.yaml
+devices:
+  - {name: SRV-FILE-01, kind: host, ip: 192.168.1.30, location: "ห้องเซิร์ฟเวอร์", depends_on: SW-CORE-01, groups: [Servers], metrics: {cpu: 22, memory_used: 48, disk_used: 81}}
+alerts:
+  - host: SRV-FILE-01
+    description: "High I/O wait time (over 30% for 10m)"
+    priority: 4
+    since: "-14m"
+    comments: "iowait 47%; ดิสก์ sdb: SMART Reallocated_Sector_Ct = 1284 (สัปดาห์ก่อน 96), Current_Pending_Sector = 37; RAID5 (4 ดิสก์) สถานะ degraded — sdb ถูกตัดออกจาก array เมื่อ 20 นาทีก่อน; ไม่มี hot spare"

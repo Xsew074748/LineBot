@@ -1,0 +1,6 @@
+# Gateway ล่ม แต่ LAN ภายในปกติ (ตรงกับ NET-02) — gateway ไม่มีอุปกรณ์ลูก จึงไม่เกิดลูกโซ่
+name: "Gateway ขอบเครือข่ายล่ม"
+description: "GW-EDGE-01 down; AP/Switch/กล้องอื่นปกติ"
+extends: 01-baseline-office.yaml
+patch:
+  - {name: GW-EDGE-01, set: {status: down, down_since: "-3m"}}

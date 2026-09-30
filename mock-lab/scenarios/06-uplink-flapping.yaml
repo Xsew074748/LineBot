@@ -1,0 +1,7 @@
+# สัญญาณ flapping: switch ชั้น 2 ล่ม 20 วินาทีทุก 2 นาที (uplink สะดุด) — อุปกรณ์ลูกสะดุดตามจังหวะเดียวกัน (ตรงกับ FLAP-01)
+# หมายเหตุ: สถานะเปลี่ยนตามเวลาจริง — ยิง API ซ้ำๆ จะเห็นทั้ง up และ down
+name: "Uplink ชั้น 2 สะดุด (flapping)"
+description: "SW-FL2-01 flap: down 20 วินาทีในทุกรอบ 120 วินาที"
+extends: 01-baseline-office.yaml
+patch:
+  - {name: SW-FL2-01, set: {flap: {period_s: 120, down_s: 20}}}

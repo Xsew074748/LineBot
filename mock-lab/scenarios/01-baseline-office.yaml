@@ -1,0 +1,49 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# สถานการณ์ฐาน: สำนักงาน 3 ชั้น ทุกอย่างปกติ (ใช้เป็นฐานของสถานการณ์อื่นผ่าน extends)
+#   gateway 1 · core switch 1 · switch ชั้นละ 1 · AP ชั้นละ 2 · กล้อง 12 ตัว · server 4 เครื่อง
+#
+# รูปแบบอุปกรณ์ (ทุกฟิลด์นอกจาก name/kind เป็น optional):
+#   name, kind: ap|switch|gateway|camera|host, ip, mac, model, location
+#   status: up|down|unknown        down_since: "-15m" | "-4d3h" | ISO | epoch
+#   depends_on: <ชื่ออุปกรณ์แม่>     ถ้าแม่ down ลูกจะ down ตาม (ลูกโซ่)
+#   flap: {period_s, down_s}        สลับ down เป็นช่วงๆ  ·  zabbix_status: ค่าที่ Zabbix เห็นต่างจากระบบอื่น
+#   zabbix: true | {groups: [...]}  สะท้อนอุปกรณ์เข้า Zabbix (camera ใช้กลุ่ม Camera โดยอัตโนมัติ)
+#   metrics: {cpu, memory_used, disk_used}   (%; เกิน 90 จะสร้าง trigger ให้เอง)
+#   clients: N (ของ AP/switch)      alerts: [{description, priority 0-5, since, comments}]
+# ═══════════════════════════════════════════════════════════════════════════
+name: "สำนักงาน 3 ชั้น (ปกติทั้งหมด)"
+description: "baseline — ไม่มีอุปกรณ์ล่ม ไม่มี alert"
+
+devices:
+  # ── เครือข่าย (Omada) ─────────────────────────────────────────────────────
+  - {name: SW-CORE-01, kind: switch, ip: 192.168.1.2, model: TL-SG6428X, zabbix: {groups: [Network]}}
+  - {name: GW-EDGE-01, kind: gateway, ip: 192.168.1.1, model: ER8411, depends_on: SW-CORE-01, zabbix: {groups: [Network]}}
+  - {name: SW-FL1-01, kind: switch, ip: 192.168.10.2, model: TL-SG3428X, depends_on: SW-CORE-01, zabbix: {groups: [Network]}}
+  - {name: AP-FL1-01, kind: ap, ip: 192.168.10.11, model: EAP670, depends_on: SW-FL1-01, clients: 9}
+  - {name: AP-FL1-02, kind: ap, ip: 192.168.10.12, model: EAP670, depends_on: SW-FL1-01, clients: 10}
+  - {name: SW-FL2-01, kind: switch, ip: 192.168.20.2, model: TL-SG3428X, depends_on: SW-CORE-01, zabbix: {groups: [Network]}}
+  - {name: AP-FL2-01, kind: ap, ip: 192.168.20.11, model: EAP670, depends_on: SW-FL2-01, clients: 10}
+  - {name: AP-FL2-02, kind: ap, ip: 192.168.20.12, model: EAP670, depends_on: SW-FL2-01, clients: 12}
+  - {name: SW-FL3-01, kind: switch, ip: 192.168.30.2, model: TL-SG3428X, depends_on: SW-CORE-01, zabbix: {groups: [Network]}}
+  - {name: AP-FL3-01, kind: ap, ip: 192.168.30.11, model: EAP670, depends_on: SW-FL3-01, clients: 11}
+  - {name: AP-FL3-02, kind: ap, ip: 192.168.30.12, model: EAP670, depends_on: SW-FL3-01, clients: 14}
+
+  # ── กล้อง (HikCentral) — สะท้อนเข้า Zabbix กลุ่ม Camera ────────────────────
+  - {name: HQ-CAM-101, kind: camera, ip: 192.168.10.101, location: "ชั้น 1", depends_on: SW-FL1-01, zabbix: true}
+  - {name: HQ-CAM-102, kind: camera, ip: 192.168.10.102, location: "ชั้น 1", depends_on: SW-FL1-01, zabbix: true}
+  - {name: HQ-CAM-103, kind: camera, ip: 192.168.10.103, location: "ชั้น 1", depends_on: SW-FL1-01, zabbix: true}
+  - {name: HQ-CAM-104, kind: camera, ip: 192.168.10.104, location: "ชั้น 1", depends_on: SW-FL1-01, zabbix: true}
+  - {name: HQ-CAM-201, kind: camera, ip: 192.168.20.101, location: "ชั้น 2", depends_on: SW-FL2-01, zabbix: true}
+  - {name: HQ-CAM-202, kind: camera, ip: 192.168.20.102, location: "ชั้น 2", depends_on: SW-FL2-01, zabbix: true}
+  - {name: HQ-CAM-203, kind: camera, ip: 192.168.20.103, location: "ชั้น 2", depends_on: SW-FL2-01, zabbix: true}
+  - {name: HQ-CAM-204, kind: camera, ip: 192.168.20.104, location: "ชั้น 2", depends_on: SW-FL2-01, zabbix: true}
+  - {name: HQ-CAM-205, kind: camera, ip: 192.168.20.105, location: "ชั้น 2", depends_on: SW-FL2-01, zabbix: true}
+  - {name: HQ-CAM-301, kind: camera, ip: 192.168.30.101, location: "ชั้น 3", depends_on: SW-FL3-01, zabbix: true}
+  - {name: HQ-CAM-302, kind: camera, ip: 192.168.30.102, location: "ชั้น 3", depends_on: SW-FL3-01, zabbix: true}
+  - {name: HQ-CAM-303, kind: camera, ip: 192.168.30.103, location: "ชั้น 3", depends_on: SW-FL3-01, zabbix: true}
+
+  # ── เซิร์ฟเวอร์ (Zabbix) ──────────────────────────────────────────────────
+  - {name: SRV-APP-01, kind: host, ip: 192.168.1.11, location: "ห้องเซิร์ฟเวอร์", depends_on: SW-CORE-01, groups: [Servers], metrics: {cpu: 32, memory_used: 55, disk_used: 48}}
+  - {name: SRV-DB-01,  kind: host, ip: 192.168.1.12, location: "ห้องเซิร์ฟเวอร์", depends_on: SW-CORE-01, groups: [Servers], metrics: {cpu: 28, memory_used: 62, disk_used: 57}}
+  - {name: SRV-WEB-01, kind: host, ip: 192.168.1.13, location: "ห้องเซิร์ฟเวอร์", depends_on: SW-CORE-01, groups: [Servers], metrics: {cpu: 18, memory_used: 41, disk_used: 39}}
+  - {name: SRV-NVR-01, kind: host, ip: 192.168.1.20, location: "ห้องเซิร์ฟเวอร์", depends_on: SW-CORE-01, groups: [NVR], metrics: {cpu: 35, memory_used: 50, disk_used: 72}}

@@ -1,0 +1,10 @@
+# NVR ล่ม → กล้องชั้น 1 (ที่ผูกกับ NVR นี้) ออฟไลน์ตาม (ตรงกับ CAS-04)
+name: "NVR ล่ม กล้องชั้น 1 หายทั้งกลุ่ม"
+description: "SRV-NVR-01 down → HQ-CAM-101..104 ออฟไลน์ (เปลี่ยนตัวแม่ของกล้องจาก switch เป็น NVR)"
+extends: 01-baseline-office.yaml
+patch:
+  - {name: HQ-CAM-101, set: {depends_on: SRV-NVR-01}}
+  - {name: HQ-CAM-102, set: {depends_on: SRV-NVR-01}}
+  - {name: HQ-CAM-103, set: {depends_on: SRV-NVR-01}}
+  - {name: HQ-CAM-104, set: {depends_on: SRV-NVR-01}}
+  - {name: SRV-NVR-01, set: {status: down, down_since: "-25m"}}
