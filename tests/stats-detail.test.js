@@ -192,3 +192,81 @@ describe('buildDetail() — ผ่าน mock-lab', () => {
     expect(d.hikcentral.events).toBeNull();
   });
 });
+
+// ── รูปแบบ request ของ eventRecords ที่ยืนยันกับ HikCentral จริง (กัน regression: เคยส่ง array/ไม่มี srcType/srcIndexs) ──
+describe('HikCentral eventRecords — รูปแบบ request ที่เซิร์ฟเวอร์จริงรับ', () => {
+  let server; let url; let holder; let hik;
+  const NOW_MS = Date.now();
+  const iso = (ms, off = '+00:00') => new Date(ms).toISOString().replace(/\.\d+Z$/, off);
+
+  beforeAll(async () => {
+    const { createApp, loadConfig } = require('../mock-lab/server');
+    // strictAuth=false: ยิงตรงด้วย fetch ได้โดยไม่ต้องเซ็น (ส่วนที่ทดสอบคือ parameter ไม่ใช่ลายเซ็น)
+    const created = createApp({ scenarioFile: '01-baseline-office.yaml', config: { ...loadConfig(), strictAuth: false } });
+    holder = created.holder;
+    await new Promise((r) => { server = created.app.listen(0, '127.0.0.1', r); });
+    url = `http://127.0.0.1:${server.address().port}`;
+    Object.assign(process.env, {
+      HIKCENTRAL_URL: url, HIKCENTRAL_APP_KEY: 'k', HIKCENTRAL_APP_SECRET: 's',
+    });
+    jest.resetModules();
+    hik = require('../services/hikcentral');
+  });
+  afterAll(() => new Promise((r) => server.close(r)));
+
+  const post = async (body) => {
+    const r = await fetch(`${url}/artemis/api/eventService/v1/eventRecords/page`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-ca-key': 'k', 'x-ca-signature': 'x', 'x-ca-timestamp': '1' },
+      body: JSON.stringify(body),
+    });
+    return r.json();
+  };
+  const good = () => ({
+    pageNo: 1, pageSize: 5, startTime: iso(NOW_MS - 3600e3), endTime: iso(NOW_MS),
+    eventTypes: '131330', srcType: 'camera', srcIndexs: 'HQ-CAM-101,HQ-CAM-102',
+  });
+
+  it('รูปแบบที่ถูกต้องผ่าน (code 0)', async () => {
+    expect((await post(good())).code).toBe('0');
+  });
+
+  it.each([
+    ['eventTypes เป็น array', { eventTypes: [131330] }, 'eventTypes'],
+    ['eventTypes รหัสไม่รู้จัก', { eventTypes: '1' }, 'eventTypes'],
+    ['eventTypes ว่าง', { eventTypes: '' }, 'eventTypes'],
+    ['เวลาลงท้าย Z', { startTime: iso(NOW_MS - 3600e3, 'Z') }, 'startTime'],
+    ['ไม่มี endTime', { endTime: undefined }, 'endTime'],
+    ['ไม่มี srcType', { srcType: undefined }, 'srcType'],
+    ['srcType ผิด', { srcType: 'door' }, 'srcType'],
+    ['srcIndexs เป็น array', { srcIndexs: ['HQ-CAM-101'] }, 'srcIndexs'],
+    ['ไม่มี srcIndexs', { srcIndexs: undefined }, 'srcIndexs'],
+  ])('ปฏิเสธ: %s', async (_label, patch, field) => {
+    const r = await post({ ...good(), ...patch });
+    expect(r.code).toBe('2');
+    expect(r.msg).toContain(`[${field} parameter error]`);
+  });
+
+  it('กรองตาม srcIndexs: ได้เฉพาะ event ของกล้องที่ระบุ', async () => {
+    const r = await post({ ...good(), eventTypes: '131330', srcIndexs: 'HQ-CAM-101', pageSize: 500 });
+    expect(r.data.total).toBeGreaterThan(0);
+    expect(r.data.list.every((e) => e.srcIndex === 'HQ-CAM-101')).toBe(true);
+  });
+
+  it('getEventRecords ส่งรูปแบบที่ถูกต้อง: ผ่านเซิร์ฟเวอร์ที่ตรวจเข้มได้และได้ record', async () => {
+    const r = await hik.getEventRecords({ startMs: NOW_MS - 3600e3, endMs: NOW_MS, eventTypes: [131330, 131331, 131332] });
+    expect(r.records.length).toBeGreaterThan(0);
+    expect(r.truncated).toBe(false);
+  });
+
+  it('กล้องเกิน 100 ตัว → แบ่งเป็นหลาย request และยังได้ event ของกล้องในกลุ่มหลัง ๆ', async () => {
+    for (let i = 1; i <= 150; i++) holder.state.upsert({ name: `BULK-${String(i).padStart(3, '0')}`, kind: 'camera' });
+    jest.resetModules();
+    const fresh = require('../services/hikcentral'); // cache รายชื่อกล้องใหม่
+    const before = holder.requests.filter((q) => q.what === 'eventRecords').length;
+    const r = await fresh.getEventRecords({ startMs: NOW_MS - 3600e3, endMs: NOW_MS, eventTypes: [131330] });
+    const calls = holder.requests.filter((q) => q.what === 'eventRecords').length - before;
+    expect(calls).toBeGreaterThanOrEqual(2);
+    const cams = new Set(r.records.map((e) => e.cameraId));
+    expect([...cams].some((c) => /^BULK-1[0-4]\d$/.test(c))).toBe(true); // กล้องลำดับท้าย (อยู่ chunk ที่ 2)
+  });
+});

@@ -74,22 +74,34 @@ module.exports = function hikRoutes(holder, cfg) {
   const MOCK_EVENT_TYPES = { 131329: 'Camera offline', 131330: 'Motion detection', 131331: 'Video loss', 131332: 'Video tampering' };
   const hash = (str) => { let h = 2166136261; for (const ch of str) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0; return h; };
 
-  // ของจริง: ต้องมี startTime (ISO8601 มี offset) และ eventTypes (array ไม่ว่าง) ไม่งั้น code=2 "parameter error"
-  // เรียกแบบเก่า (ไม่มีทั้งคู่) ยังตอบ event "Camera offline" ล่าสุดเหมือนเดิมเพื่อไม่ให้ test เดิมพัง
+  // รูปแบบที่ "ยืนยันกับ HikCentral จริงแล้ว" (ผิด → code 2 "[<field> parameter error]" ตรวจเรียงตามนี้):
+  //   startTime, endTime : บังคับ ISO8601 ลงท้าย offset เช่น +00:00 (ลงท้าย Z ไม่ผ่าน)
+  //   eventTypes         : สตริงรหัสคั่น "," (array ไม่ผ่าน)
+  //   srcType            : สตริง "camera"
+  //   srcIndexs          : สตริง cameraIndexCode คั่น "," (array ไม่ผ่าน, ขาดไม่ได้)
+  // เรียกแบบเก่าที่ไม่ส่งพารามิเตอร์พวกนี้เลย (getEvents) → ตอบ "Camera offline" ล่าสุดเหมือนเดิม — ของจริงปฏิเสธการเรียกแบบนี้
+  const OFFSET_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/;
   router.post('/artemis/api/eventService/v1/eventRecords/page', (req, res) => {
     holder.log('hikcentral', 'eventRecords');
     const s = holder.state; const now = Math.floor(Date.now() / 1000);
     const body = req.body || {};
-    const strict = body.startTime !== undefined || body.eventTypes !== undefined;
+    const strict = ['startTime', 'endTime', 'eventTypes', 'srcType', 'srcIndexs'].some((k) => body[k] !== undefined);
     if (strict) {
       const bad = (what) => res.json({ code: '2', msg: `Incorrect request parameter. [${what} parameter error]` });
-      const st = Date.parse(body.startTime); const et = body.endTime === undefined ? now * 1000 : Date.parse(body.endTime);
-      if (typeof body.startTime !== 'string' || Number.isNaN(st)) return bad('startTime');
-      if (Number.isNaN(et) || et < st) return bad('endTime');
-      if (!Array.isArray(body.eventTypes) || !body.eventTypes.length || !body.eventTypes.every((t) => MOCK_EVENT_TYPES[t])) return bad('eventTypes');
-      const wanted = new Set(body.eventTypes.map(Number));
+      const validTime = (v) => typeof v === 'string' && OFFSET_ISO.test(v) && !Number.isNaN(Date.parse(v));
+      if (!validTime(body.startTime)) return bad('startTime');
+      if (!validTime(body.endTime)) return bad('endTime');
+      const st = Date.parse(body.startTime); const et = Date.parse(body.endTime);
+      if (et < st) return bad('endTime');
+      const typeList = typeof body.eventTypes === 'string' ? body.eventTypes.split(',').map((x) => x.trim()) : null;
+      if (!typeList || !typeList.length || !typeList.every((t) => /^\d+$/.test(t) && MOCK_EVENT_TYPES[t])) return bad('eventTypes');
+      if (body.srcType !== 'camera') return bad('srcType');
+      const srcList = typeof body.srcIndexs === 'string' ? body.srcIndexs.split(',').map((x) => x.trim()).filter(Boolean) : null;
+      if (!srcList || !srcList.length) return bad('srcIndexs');
+      const srcSet = new Set(srcList);
+      const wanted = new Set(typeList.map(Number));
       const events = [];
-      const cams = s.inHik().filter((c) => s.viewStatus(c, 'hikcentral', now) === 'up');
+      const cams = s.inHik().filter((c) => srcSet.has(c.name) && s.viewStatus(c, 'hikcentral', now) === 'up');
       // 1 นาทีต่อ slot: motion บ่อย, video loss/tamper นานๆ ครั้ง — คงที่ตามชื่อกล้อง+slot (ซ้ำได้ ไม่สุ่ม)
       for (let t = Math.ceil(st / 60000) * 60000; t <= et && events.length < 5000; t += 60000) {
         for (const c of cams) {

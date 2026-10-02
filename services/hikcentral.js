@@ -196,35 +196,76 @@ async function getEvents(limit = 10) {
 
 
 // ── Event ตามช่วงเวลา (ใช้กับ /stats/detail) ──────────────────────────────────
-// ยืนยันกับระบบจริง (อ่านอย่างเดียว): eventRecords/page บังคับ startTime (ISO8601 มี offset) และ
-// eventTypes (array ของรหัสชนิด event) — ขาดตัวใดตัวหนึ่งได้ code=2 "parameter error"
-// ยังไม่ยืนยัน: รหัส eventTypes ที่ถูกต้อง (สแกนช่วงที่เดาได้แล้วไม่ผ่าน) และชื่อ field ในแต่ละ record
+// รูปแบบ request ที่ "ยืนยันกับ HikCentral จริงแล้ว" (probe อ่านอย่างเดียว) — ผิดรูปแบบได้ code=2 [... parameter error]:
+//   • startTime/endTime บังคับทั้งคู่ เป็น ISO8601 ลงท้าย offset เช่น +00:00 (ลงท้าย Z ไม่ผ่าน)
+//   • eventTypes = สตริงรหัสคั่นด้วย "," (array ไม่ผ่าน)
+//   • srcType = "camera" และ srcIndexs = สตริง camera index code คั่นด้วย "," (array ไม่ผ่าน; ขาดไม่ได้)
+// ยังไม่ยืนยัน: ความหมายของรหัส eventTypes (motion/video loss/tamper) และชื่อ field ใน record
 // → ต้องกำหนดรหัสเองผ่าน HIKCENTRAL_EVENT_TYPES (คั่นด้วย ,) ไม่เดาให้
-const EVENT_PAGE_SIZE = 500;
-const EVENT_MAX_PAGES = 5; // กันชน — ไม่เกิน 2,500 event ต่อรอบ
+const EVENT_PAGE_SIZE   = 500;
+const EVENT_CAM_CHUNK   = 100; // จำนวนกล้องต่อ request (ทดสอบจริงผ่านที่ 68 กล้อง/321 ตัวอักษร; จำกัดไว้กัน URL/body ยาวเกิน)
+const EVENT_MAX_REQUESTS = 10; // กันชน — รวมทุก chunk/หน้า
+const CAMERA_CODES_TTL_MS = 10 * 60 * 1000;
 const isoWithOffset = (ms) => new Date(ms).toISOString().replace(/\.\d+Z$/, '+00:00');
 
-async function getEventRecords({ startMs, endMs, eventTypes }) {
-  const all = [];
-  let truncated = false;
-  for (let page = 1; page <= EVENT_MAX_PAGES; page++) {
-    const data = await hikPost('/artemis/api/eventService/v1/eventRecords/page', {
-      pageNo: page, pageSize: EVENT_PAGE_SIZE,
-      startTime: isoWithOffset(startMs), endTime: isoWithOffset(endMs), eventTypes,
-    });
-    const list = data?.list || [];
-    all.push(...list);
-    const total = Number(data?.total ?? 0);
-    if (list.length < EVENT_PAGE_SIZE || (total && all.length >= total)) break;
-    if (page === EVENT_MAX_PAGES) truncated = true;
+const cameraCodeCache = { codes: null, expireAt: 0 };
+
+// cameraIndexCode ของทุกกล้อง (cache 10 นาที — ถ้าดึงใหม่ไม่ได้ใช้ของเดิม ไม่มีเลยค่อย throw)
+async function getCameraIndexCodes() {
+  if (cameraCodeCache.codes && Date.now() < cameraCodeCache.expireAt) return cameraCodeCache.codes;
+  try {
+    const codes = [];
+    for (let page = 1; page <= 20; page++) {
+      const data = await hikPost('/artemis/api/resource/v1/cameras', { pageNo: page, pageSize: 500 });
+      const list = data?.list || [];
+      for (const c of list) { const id = c.cameraIndexCode || c.indexCode; if (id) codes.push(String(id)); }
+      const total = Number(data?.total ?? 0);
+      if (list.length < 500 || (total && codes.length >= total)) break;
+    }
+    cameraCodeCache.codes = codes;
+    cameraCodeCache.expireAt = Date.now() + CAMERA_CODES_TTL_MS;
+  } catch (err) {
+    if (!cameraCodeCache.codes) throw err;
+    logger.warn(`hikcentral: ดึงรายชื่อกล้องไม่ได้ ใช้รายการเดิม (${err.message})`);
   }
-  const records = all.map((e) => ({
-    name:       e.eventName || e.eventTypeName || e.srcName || 'N/A',
-    type:       e.eventType ?? null,
-    cameraId:   e.srcIndex || e.cameraIndexCode || null,
-    cameraName: e.srcName || e.cameraName || null,
-  }));
-  return { records, truncated };
+  return cameraCodeCache.codes;
+}
+
+// eventTypes: array ของรหัส (จำนวนเต็ม) — แปลงเป็นสตริงคั่น "," ตอนส่ง
+async function getEventRecords({ startMs, endMs, eventTypes }) {
+  const codes = await getCameraIndexCodes();
+  const records = [];
+  let truncated = false;
+  let requests = 0;
+  const typesCsv = eventTypes.join(',');
+
+  outer:
+  for (let i = 0; i < codes.length; i += EVENT_CAM_CHUNK) {
+    const srcIndexs = codes.slice(i, i + EVENT_CAM_CHUNK).join(',');
+    for (let page = 1; ; page++) {
+      if (requests >= EVENT_MAX_REQUESTS) { truncated = true; break outer; }
+      requests++;
+      const data = await hikPost('/artemis/api/eventService/v1/eventRecords/page', {
+        pageNo: page, pageSize: EVENT_PAGE_SIZE,
+        startTime: isoWithOffset(startMs), endTime: isoWithOffset(endMs),
+        eventTypes: typesCsv, srcType: 'camera', srcIndexs,
+      });
+      const list = data?.list || [];
+      records.push(...list);
+      const total = Number(data?.total ?? 0);
+      const got = (page - 1) * EVENT_PAGE_SIZE + list.length;
+      if (list.length < EVENT_PAGE_SIZE || (total && got >= total)) break;
+    }
+  }
+  return {
+    records: records.map((e) => ({
+      name:       e.eventName || e.eventTypeName || e.srcName || 'N/A',
+      type:       e.eventType ?? null,
+      cameraId:   e.srcIndex || e.cameraIndexCode || null,
+      cameraName: e.srcName || e.cameraName || null,
+    })),
+    truncated,
+  };
 }
 
 // ── สถานะ online — artemis ใช้ status: 1 = online, 0 = offline ────────────────
