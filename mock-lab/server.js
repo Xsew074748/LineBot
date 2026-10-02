@@ -30,6 +30,7 @@ function createApp({ scenarioFile = '01-baseline-office.yaml', config = loadConf
     state: loadScenarioFile(scenarioFile),
     source: { file: scenarioFile },
     requests: [],
+    faults: {}, // { hikcentral: 'hang' | 'error500' } — ดู routes/control.js POST /mock/fault
     // บันทึกเฉพาะ ระบบ + method/endpoint (ไม่เก็บ header, body หรือ secret)
     log(system, what) { this.requests.push({ t: new Date().toISOString(), system, what }); if (this.requests.length > 500) this.requests.shift(); },
   };

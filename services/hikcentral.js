@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const https  = require('https');
 const fs     = require('fs');
 const logger = require('./logger');
+const { createBreaker, envPositiveInt } = require('./circuit-breaker');
 
 // ── HikCentral OpenAPI (artemis) — AK/SK Signature Authentication ─────────────
 // อ้างอิง: HikCentral Professional OpenAPI Developer Guide V2.6.1
@@ -36,7 +37,23 @@ function buildHttpsAgent() {
   return new https.Agent({ rejectUnauthorized: false });
 }
 
-const hikHttp = axios.create({ httpsAgent: buildHttpsAgent(), timeout: 10_000 });
+// timeout ปรับได้ด้วย HIKCENTRAL_TIMEOUT_MS (ค่าเริ่มต้น 10 วินาที — ใช้ค่าต่ำใน test)
+const hikHttp = axios.create({ httpsAgent: buildHttpsAgent(), timeout: envPositiveInt(process.env.HIKCENTRAL_TIMEOUT_MS, 10_000) });
+
+// ── Circuit breaker ของ HikCentral (ตัวเดียวทั้ง server) ──────────────────────────────
+// ที่มา: /cameras timeout ~10 วินาทีเป็นช่วงๆ (เคยล้มติดกัน ~26 ครั้ง) ทำให้คำสั่ง summary/cross/status/กล้อง ต้องรอ 10–20 วินาที
+// ล้มเหลวติดกัน N ครั้ง (timeout / เครือข่ายขาด / HTTP 5xx) → งดเรียก cooldown แล้วลอง 1 คำขอ ดู services/circuit-breaker.js
+// ปรับได้: HIKCENTRAL_BREAKER_THRESHOLD (3), HIKCENTRAL_BREAKER_COOLDOWN_MS (60000) — ไม่ใช้ข้อมูลเก่าแทนตอน breaker เปิด (ตั้งใจ)
+const breaker = createBreaker({
+  name: 'hikcentral',
+  failureThreshold: envPositiveInt(process.env.HIKCENTRAL_BREAKER_THRESHOLD, 3),
+  cooldownMs: envPositiveInt(process.env.HIKCENTRAL_BREAKER_COOLDOWN_MS, 60_000),
+  logger,
+});
+
+function getBreakerState() {
+  return breaker.snapshot();
+}
 
 // ── AK/SK Signature ────────────────────────────────────────────────────────────
 // stringToSign = METHOD\nAccept\nContent-MD5\nContent-Type\nDate\n
@@ -75,7 +92,12 @@ function buildSignedHeaders(method, path, appKey = APP_KEY, appSecret = APP_SECR
 
 // ── POST helper — ทุก endpoint ของ artemis ใช้ POST ────────────────────────────
 // override: { url, appKey, appSecret, timeoutMs } — ใช้ทดสอบ config ที่ยังไม่บันทึก ไม่ส่ง = ใช้ env
-async function hikPost(path, body = {}, override = null) {
+// override (ทดสอบ config ที่ยังไม่บันทึก) ข้าม breaker ทั้งหมด — ไม่ให้การทดสอบเปลี่ยนสถานะของระบบจริง
+function hikPost(path, body = {}, override = null) {
+  return override ? hikPostRaw(path, body, override) : breaker.execute(() => hikPostRaw(path, body, null));
+}
+
+async function hikPostRaw(path, body = {}, override = null) {
   const start = Date.now();
   try {
     const baseUrl = override?.url !== undefined ? override.url.replace(/\/+$/, '') : BASE_URL;
@@ -309,6 +331,7 @@ async function checkAuth(cfg) {
 }
 
 module.exports = {
+  getBreakerState,
   checkAuth,
   getCameras,
   getCameraStatus,

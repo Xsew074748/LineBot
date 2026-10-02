@@ -10,6 +10,14 @@ const crypto = require('crypto');
 module.exports = function hikRoutes(holder, cfg) {
   const router = Router();
 
+  // fault injection (ตั้งผ่าน POST /mock/fault): hang = ไม่ตอบเลย (client timeout), error500 = HTTP 500, ok = ปกติ
+  router.use('/artemis', (req, res, next) => {
+    const fault = holder.faults && holder.faults.hikcentral;
+    if (fault === 'hang') { holder.log('hikcentral', 'FAULT hang'); return undefined; }
+    if (fault === 'error500') { holder.log('hikcentral', 'FAULT 500'); return res.status(500).json({ code: '500', msg: 'mock internal error' }); }
+    return next();
+  });
+
   router.use('/artemis', (req, res, next) => {
     const h = req.headers;
     if (!h['x-ca-key'] || !h['x-ca-signature'] || !h['x-ca-timestamp']) {

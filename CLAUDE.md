@@ -26,6 +26,13 @@
   อย่าใส่ backtick ในสตริงของ node -e (bash รันเป็นคำสั่ง) ให้เขียนสคริปต์เป็นไฟล์แทน
 - /test-connection (POST) ใช้ค่าที่ส่งมาตรงๆ ยิงออกไปยัง URL ที่รับมา → จำกัดเฉพาะ LAN (setupAuth.lanOnly) กัน SSRF
 
+## Circuit breaker ของ HikCentral (services/circuit-breaker.js, ครอบที่ hikPost จุดเดียว)
+- ล้มเหลวติดกัน 3 ครั้ง (timeout / เครือข่ายขาด / HTTP 5xx) → เปิด 60 วินาที (คำขอล้มทันที ไม่รอ 10 วินาที) → ลอง 1 คำขอ → ปิดเมื่อสำเร็จ;
+  ปรับด้วย HIKCENTRAL_BREAKER_THRESHOLD / HIKCENTRAL_BREAKER_COOLDOWN_MS (และ HIKCENTRAL_TIMEOUT_MS สำหรับ timeout ต่อคำขอ)
+- ไม่นับ: 4xx, ลายเซ็นผิด, code != 0 ของ artemis (เช่น parameter error ของเราเอง) — เซิร์ฟเวอร์ตอบอยู่ ไม่ใช่ปัญหาความพร้อมใช้งาน
+- override (ปุ่ม "ทดสอบการเชื่อมต่อ" ด้วย config ที่ยังไม่บันทึก) ข้าม breaker; ไม่ใช้ข้อมูลเก่าแทนตอน breaker เปิด (ตั้งใจ — ไม่รู้สถานะจริงก็ไม่ควรบอกว่าปกติ)
+- สถานะอยู่ใน /stats: `breakers: { hikcentral: "closed" | "open" | "half_open" }` (log เฉพาะตอนเปลี่ยนสถานะ); ทดสอบด้วย mock-lab `POST /mock/fault`
+
 ## เครื่องมือทดสอบ (โฟลเดอร์ใหม่ ไม่อยู่ใน production image)
 - mock-lab/ — จำลอง Zabbix + Omada Open API + HikCentral (artemis) ให้บอทจริงต่อเข้ามา สถานการณ์เป็น YAML
   (depends_on = ลูกโซ่, flap, zabbix_status ขัดแย้ง, metrics, generate:) ดู mock-lab/README.md

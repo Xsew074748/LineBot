@@ -82,6 +82,11 @@ async function buildStats({ monitorKeys = [], zabbix = null, omada = null, hikce
     stats.devices.cameras = countUpDown(cams, (c) => (c.available !== undefined ? c.available === 1 : c.online === true));
   }
 
+  // สถานะ circuit breaker ของ HikCentral (closed | open | half_open) — ให้ Manager/ผู้ดูแลเห็น (เพิ่มเฉพาะเมื่อ service รองรับ)
+  if (hikcentral && typeof hikcentral.getBreakerState === 'function') {
+    stats.breakers = { hikcentral: hikcentral.getBreakerState().state };
+  }
+
   if (failed.size > 0) {
     stats.partial = true;
     stats.failed  = [...failed];
