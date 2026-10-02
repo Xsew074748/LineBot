@@ -33,6 +33,14 @@
 - override (ปุ่ม "ทดสอบการเชื่อมต่อ" ด้วย config ที่ยังไม่บันทึก) ข้าม breaker; ไม่ใช้ข้อมูลเก่าแทนตอน breaker เปิด (ตั้งใจ — ไม่รู้สถานะจริงก็ไม่ควรบอกว่าปกติ)
 - สถานะอยู่ใน /stats: `breakers: { hikcentral: "closed" | "open" | "half_open" }` (log เฉพาะตอนเปลี่ยนสถานะ); ทดสอบด้วย mock-lab `POST /mock/fault`
 
+## แจ้งเตือน Omada traffic เกิน threshold (services/omada-traffic-alert.js) — ปิดเป็นค่าเริ่มต้น
+- ตั้ง OMADA_TRAFFIC_ALERT_DOWN_MBPS / _UP_MBPS (อย่างน้อยหนึ่งตัว) จึงเปิด; ค่าอื่นดู .env.example (sustain 2 bucket, cooldown 30 นาที, ตรวจทุก 5 นาที, severity 3)
+- วัดเฉพาะ traffic ของ AP จาก dashboard/traffic-activities เฉพาะ bucket ที่ปิดแล้ว; เกินติดกัน N bucket → แจ้ง; ต่ำกว่า 80% ติดกัน N bucket → ส่ง "กลับสู่ปกติ";
+  ส่งผ่าน pushToUsers เดิม (allow-list: severity 3 = ADMIN/IT_STAFF เท่านั้น); state อยู่ที่ data/omada-traffic-alert.json (รอด recreate; ไม่นับ bucket ซ้ำ)
+- ⚠️ ยังไม่ยืนยันกับของจริง: ชื่อ field tx/rx และหน่วย (สมมติ bytes ต่อ bucket) เพราะไซต์ไม่มี client — **เปิด OMADA_TRAFFIC_ALERT_DRYRUN=true ก่อน**
+  เทียบ log `bucket ล่าสุด down=… up=…` กับหน้า Omada แล้วค่อยปิด dry-run; ถ้า field ไม่รู้จักจะไม่แจ้งและ log ชื่อ field (ต้องเพิ่มใน TX_KEYS/RX_KEYS ของ stats-detail.js)
+- DRYRUN ไม่เขียน state ลงไฟล์ (ไม่งั้นสลับเป็นโหมดจริงแล้วแจ้งครั้งแรกไม่ออก)
+
 ## เครื่องมือทดสอบ (โฟลเดอร์ใหม่ ไม่อยู่ใน production image)
 - mock-lab/ — จำลอง Zabbix + Omada Open API + HikCentral (artemis) ให้บอทจริงต่อเข้ามา สถานการณ์เป็น YAML
   (depends_on = ลูกโซ่, flap, zabbix_status ขัดแย้ง, metrics, generate:) ดู mock-lab/README.md

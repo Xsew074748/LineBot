@@ -204,5 +204,5 @@ async function buildDetail({
 
 module.exports = {
   buildDetail, sumTraffic, topClients, normalizeClients, summarizeClientStat, summarizeOverview,
-  classifyEvent, summarizeEvents, parseEventTypes, resolveWindow, pickNum,
+  classifyEvent, summarizeEvents, parseEventTypes, resolveWindow, pickNum, TX_KEYS, RX_KEYS,
 };

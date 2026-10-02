@@ -18,6 +18,7 @@ const { correlate } = require('./services/correlate');
 const statsService = require('./services/stats');
 const statsDetail  = require('./services/stats-detail');
 const pushTargets  = require('./services/push-targets');
+const omadaTrafficAlert = require('./services/omada-traffic-alert');
 const dailySummary = require('./services/daily-summary');
 
 const setupAuth   = require('./middleware/setupAuth');
@@ -1566,4 +1567,7 @@ app.listen(PORT, () => {
   }
 
   if (process.env.DAILY_SUMMARY_ENABLED !== 'false') dailyScheduler.start();
+
+  // แจ้งเตือน traffic ของ AP เกิน threshold (ปิดอยู่ถ้าไม่ตั้ง OMADA_TRAFFIC_ALERT_*_MBPS) — ส่งผ่าน pushToUsers (allow-list เดิม)
+  if (omada) omadaTrafficAlert.createChecker({ omada, pusher: pushToUsers, logger }).start();
 });
