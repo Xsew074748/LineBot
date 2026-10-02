@@ -143,6 +143,8 @@ const COMMAND_PERMISSIONS = {
   myid: ROLES.VIEWER,
   // Cross-system correlation
   cross: ROLES.IT_STAFF,
+  // สรุปปัญหาประจำวัน (สั่งรันเอง/ทดสอบ)
+  dailysummary: ROLES.ADMIN,
 };
 
 module.exports = {

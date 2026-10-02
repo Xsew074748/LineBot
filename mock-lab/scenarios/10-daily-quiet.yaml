@@ -1,0 +1,4 @@
+# สรุปประจำวัน: วันที่ไม่มีปัญหาเลย (ใช้ชุดอุปกรณ์ baseline ปกติทั้งหมด)
+name: "สรุปประจำวัน — ไม่มีปัญหา"
+description: "baseline ปกติทั้งหมด ไม่มี history"
+extends: 01-baseline-office.yaml

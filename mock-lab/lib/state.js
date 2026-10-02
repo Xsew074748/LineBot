@@ -28,6 +28,7 @@ class State {
   reset() {
     this.devices = new Map();   // name → device
     this.explicitAlerts = [];   // { host, description, priority, since, comments }
+    this.history = [];          // เหตุการณ์ที่แก้แล้วแล้ว (event.get): { host, description, priority, since, resolved }
     this.loadedAt = Math.floor(Date.now() / 1000);
     this.meta = { name: '(empty)', description: '', source: null };
   }

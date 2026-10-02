@@ -1,6 +1,6 @@
 'use strict';
 // จำลอง Zabbix JSON-RPC (POST /api_jsonrpc.php) เฉพาะ method ที่ services/zabbix.js ของบอทเรียกใช้จริง:
-//   apiinfo.version · hostgroup.get · host.get · trigger.get · problem.get · item.get · history.get
+//   apiinfo.version · hostgroup.get · host.get · trigger.get · problem.get · event.get · item.get · history.get
 // Auth: Authorization: Bearer <MOCK_ZABBIX_TOKEN> (apiinfo.version เป็น public — เหมือน Zabbix จริง)
 const { Router } = require('express');
 const { parseTime } = require('../lib/time');
@@ -104,6 +104,38 @@ module.exports = function zabbixRoutes(holder, cfg) {
         trig.sort((a, b) => Number(b.lastchange) - Number(a.lastchange));
         const out = p.limit ? trig.slice(0, p.limit) : trig;
         return out.map((t) => Object.fromEntries(Object.entries(t).filter(([k]) => k === 'hosts' || !Array.isArray(p.output) || p.output.includes(k))));
+      },
+
+      // event.get: เหตุการณ์ PROBLEM (value=1) จาก trigger ที่ active อยู่ตอนนี้ (r_eventid=0) + history ที่แก้แล้ว (r_eventid ชี้ event กลับมาปกติ)
+      // รองรับ time_from, eventids (ใช้ดึง recovery event), selectHosts, limit, sortorder
+      'event.get': (p) => {
+        const hosts = hostRecords(state);
+        const byName = new Map(hosts.map((h) => [h.host, h]));
+        const mk = (h, e) => ({ ...e, hosts: [{ hostid: h.hostid, name: h.name }] });
+        const all = [];
+        methods(state)['trigger.get']({}).forEach((t, i) => all.push(mk(t.hosts[0], {
+          eventid: String(40000 + i), clock: t.lastchange, name: t.description, severity: t.priority, value: '1', r_eventid: '0',
+        })));
+        state.history.forEach((e, i) => {
+          const h = byName.get(e.host);
+          if (!h) return;
+          const since = parseTime(e.since, state.loadedAt);
+          const rc = parseTime(e.resolved, state.loadedAt);
+          const pid = String(50000 + i * 2), rid = String(50001 + i * 2);
+          all.push(mk(h, { eventid: pid, clock: String(since), name: e.description, severity: String(e.priority ?? 3), value: '1', r_eventid: rid }));
+          all.push(mk(h, { eventid: rid, clock: String(rc), name: e.description, severity: '0', value: '0', r_eventid: '0' }));
+        });
+        let res = all;
+        if (p.eventids) { const ids = [].concat(p.eventids).map(String); res = res.filter((e) => ids.includes(e.eventid)); }
+        if (p.value !== undefined) res = res.filter((e) => e.value === String(p.value));
+        if (p.time_from) res = res.filter((e) => Number(e.clock) >= Number(p.time_from));
+        res.sort((a, b) => (p.sortorder === 'ASC' ? 1 : -1) * (Number(a.clock) - Number(b.clock)));
+        if (p.limit) res = res.slice(0, p.limit);
+        return res.map((e) => {
+          const out = Object.fromEntries(Object.entries(e).filter(([k]) => k === 'hosts' || !Array.isArray(p.output) || p.output.includes(k)));
+          if (!p.selectHosts) delete out.hosts;
+          return out;
+        });
       },
 
       'problem.get': (p) => {

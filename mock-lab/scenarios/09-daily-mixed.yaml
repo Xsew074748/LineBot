@@ -1,0 +1,16 @@
+# สรุปประจำวัน: ปัญหาผสม — Zabbix มีทั้งที่แก้แล้ว/ยังค้าง/ค้างข้ามวัน, Omada AP ดับ, HikCentral กล้องดับ (ซ้ำกับ Zabbix 1 ตัว)
+# ทดสอบ: services/daily-summary.js (สรุป 08:00/17:00)
+name: "สรุปประจำวัน — ปัญหาผสม"
+description: "แก้แล้ว 2 · ค้างวันนี้ (SRV-DB-01 memory, HQ-CAM-101) · ค้างข้ามวัน SRV-FILE-01 · AP-FL3-01 ดับ"
+extends: 01-baseline-office.yaml
+patch:
+  - {name: HQ-CAM-101, set: {status: down, down_since: "-30m"}}
+  - {name: AP-FL3-01, set: {status: down, down_since: "-20m", ignore_dependency: true}}
+  - {name: SRV-FILE-01, set: {status: down, down_since: "-30h"}}
+devices:
+  - {name: SRV-FILE-01, kind: host, ip: 192.168.1.30, groups: [Servers], status: down, down_since: "-30h", depends_on: SW-CORE-01, ignore_dependency: true}
+alerts:
+  - {host: SRV-DB-01, description: "Lack of available memory", priority: 4, since: "-2m", comments: "memory"}
+history:
+  - {host: SRV-WEB-01, description: "High CPU utilization (over 90% for 5m)", priority: 4, since: "-3m", resolved: "-1m"}
+  - {host: SRV-APP-01, description: "Free disk space is less than 10% on volume /", priority: 3, since: "-4m", resolved: "-2m"}

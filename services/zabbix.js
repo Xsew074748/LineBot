@@ -101,6 +101,40 @@ function computeAvailable(h) {
 }
 
 // ── ดึง Host ทั้งหมด พร้อมสถานะ ───────────────────────────────────────────────
+// ── เหตุการณ์ปัญหาตั้งแต่เวลาหนึ่ง (ใช้กับสรุปประจำวัน) ─────────────────────────
+// event.get value=1 = เหตุการณ์ PROBLEM; r_eventid ≠ '0' = แก้แล้ว (ชี้ไปที่ event ตอนกลับมาปกติ)
+// ต้องยิง event.get อีกรอบด้วย r_eventid เพื่อเอาเวลาที่แก้ (r_clock)
+async function getEventsSince(sinceSec, limit = 500) {
+  const events = await rpc('event.get', {
+    source: 0, object: 0, value: 1,
+    time_from: sinceSec,
+    selectHosts: ['hostid', 'name'],
+    output: ['eventid', 'clock', 'name', 'severity', 'r_eventid'],
+    sortfield: ['clock'],
+    sortorder: 'DESC',
+    limit,
+  });
+  const list = events || [];
+  const recoveryIds = list.map((e) => e.r_eventid).filter((id) => id && id !== '0');
+  const recoveryClock = {};
+  if (recoveryIds.length) {
+    const recs = await rpc('event.get', { eventids: recoveryIds, output: ['eventid', 'clock'] });
+    for (const r of (recs || [])) recoveryClock[r.eventid] = parseInt(r.clock, 10);
+  }
+  return list.map((e) => {
+    const resolved = !!e.r_eventid && e.r_eventid !== '0';
+    return {
+      id:       e.eventid,
+      name:     e.name,
+      host:     e.hosts?.[0]?.name || 'Unknown',
+      priority: parseInt(e.severity, 10),
+      clock:    parseInt(e.clock, 10),
+      resolved,
+      rClock:   resolved ? (recoveryClock[e.r_eventid] || null) : null,
+    };
+  });
+}
+
 async function getHosts(limit = 100) {
   const hosts = await rpc('host.get', {
     output: ['hostid', 'host', 'name', 'status'],
@@ -374,4 +408,4 @@ async function checkAuth({ url, apiToken, timeoutMs = 5000 }) {
   await rpc('hostgroup.get', { output: ['groupid'], limit: 1 }, { override: { url, apiToken, timeoutMs } });
 }
 
-module.exports = { checkAuth, getProblems, getHosts, getCameras, getSummary, healthCheck, fetchOfflineCamerasRaw, pageOfflineCameras, findHosts, getHostMetrics };
+module.exports = { checkAuth, getProblems, getEventsSince, getHosts, getCameras, getSummary, healthCheck, fetchOfflineCamerasRaw, pageOfflineCameras, findHosts, getHostMetrics };

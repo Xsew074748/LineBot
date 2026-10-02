@@ -7,6 +7,7 @@
 //   devices: [...]       อุปกรณ์ (ชื่อซ้ำกับฐาน = ทับทั้งตัว)
 //   patch: [{name, set}] แก้เฉพาะฟิลด์ของอุปกรณ์ที่มีอยู่ (เช่น สั่ง switch ดับ) ไม่ต้องคัดลอกอุปกรณ์ทั้งตัว
 //   alerts: [...]        trigger ของ Zabbix ที่กำหนดเอง {host, description, priority(0-5), since, comments}
+//   history: [...]       เหตุการณ์ใน Zabbix ที่แก้แล้ว (ให้ event.get เห็น) {host, description, priority, since, resolved}
 const fs = require('fs');
 const path = require('path');
 const { State } = require('./state');
@@ -65,6 +66,7 @@ function applyDocs(docs, state) {
       try { state.patch(p.name, p.set); } catch (e) { throw new Error(`${file}: patch ${e.message}`); }
     }
     for (const a of doc.alerts || []) state.explicitAlerts.push(a);
+    for (const e of doc.history || []) state.history.push(e);
   }
 }
 

@@ -16,6 +16,7 @@ const aiProviders = require('./services/ai-providers');
 const validator = require('./services/validator');
 const { correlate } = require('./services/correlate');
 const statsService = require('./services/stats');
+const dailySummary = require('./services/daily-summary');
 
 const setupAuth   = require('./middleware/setupAuth');
 const setupRouter = require('./routes/setup');
@@ -748,6 +749,19 @@ async function route(text, rawText, userId, replyToken) {
     logger.audit(userId, 'changerole', `target=${targetId} role=${role}`);
     const targetName = await getDisplayName(targetId);
     return reply(replyToken, fmt.buildAiResponse(result.ok ? `✅ เปลี่ยน role ${targetName} เป็น ${role} แล้ว` : `❌ ${result.msg}`));
+  }
+
+  // ── สรุปปัญหาประจำวัน (ADMIN) — รันทันทีโดยไม่รอ cron ───────────────────────────
+  //   "สรุปวันนี้" / "testsummary"            → ตอบกลับผู้สั่งคนเดียว (ไม่ push)
+  //   "... ทุกคน" / "... broadcast"           → ส่งให้ผู้ใช้ที่ approve แล้วทุกคนเหมือนรอบอัตโนมัติ
+  // ต้องอยู่ก่อน matchCommand: คำว่า "สรุป" ในประโยคจะไปชนคำสั่ง summary (ภาษาไทยไม่มีขอบคำ)
+  const dsMatch = text.match(/^(สรุปวันนี้|testsummary)(?:\s+(ทุกคน|broadcast))?$/);
+  if (dsMatch) {
+    if (!auth.canExecute(userId, 'dailysummary')) return reply(replyToken, fmt.buildError('คุณไม่มีสิทธิ์ใช้คำสั่งนี้'));
+    const toAll = !!dsMatch[2];
+    const result = await runDailySummary({ noSend: !toAll });
+    if (toAll) return reply(replyToken, fmt.buildAiResponse(`📋 ส่งสรุปประจำวันให้ผู้ใช้แล้ว ${result.sent}/${result.recipients} คน${result.failed.length ? ` (ส่งไม่สำเร็จ ${result.failed.length})` : ''}`));
+    return reply(replyToken, result.flex);
   }
 
   if (text === 'pending') {
@@ -1496,6 +1510,16 @@ async function pushToUsers(text, severity, flex = null) {
   }
 }
 
+// ── สรุปปัญหาประจำวัน (08:00 / 17:00 เวลาไทย) ──────────────────────────────────
+function runDailySummary(opts = {}) {
+  return dailySummary.run({
+    zabbix, omada, hikcentral,
+    listUsers: auth.listUsers,
+    send: (to, flex) => lineClient.pushMessage({ to, messages: [{ type: 'flex', altText: '📋 สรุปปัญหาประจำวัน', contents: flex }] }),
+    logger,
+  }, opts);
+}
+
 // ── Start Server ───────────────────────────────────────────────────────────────
 const PORT = config.SERVER_CONFIG.port;
 app.listen(PORT, () => {
@@ -1506,5 +1530,10 @@ app.listen(PORT, () => {
     refreshOfflineCameraCache(); // initial fetch ทันที
     setInterval(refreshOfflineCameraCache, OFFLINE_CAM_POLL_MS);
     logger.info(`poller: offline camera poller started (interval=${OFFLINE_CAM_POLL_MS / 1000}s)`);
+  }
+
+  if (process.env.DAILY_SUMMARY_ENABLED !== 'false') {
+    dailySummary.startSchedule((label) => runDailySummary({ label }), logger);
+    logger.info(`daily-summary: scheduled "${dailySummary.SCHEDULE_EXPR}" tz=${dailySummary.TZ}`);
   }
 });
