@@ -18,7 +18,7 @@ const DEFAULT_TIMES = ['08:00', '17:00'];
 const MAX_TIMES = 24;
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const SETTINGS_PATH = path.join(__dirname, '..', 'data', 'settings.json');
-const APPROVED_ROLES = ['ADMIN', 'IT_STAFF', 'VIEWER']; // ทุก role ที่ไม่ใช่ PENDING
+const { APPROVED_ROLES } = require('../config'); // allow-list กลาง ใช้ร่วมกับ alert (services/push-targets.js)
 const MAX_PER_SECTION = 8;
 
 // 00:00 ของวันนี้ตามเวลาไทย (ms) — คำนวณจาก offset ตรงๆ ไม่พึ่ง TZ ของ process

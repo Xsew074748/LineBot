@@ -99,6 +99,13 @@ const ROLES = {
   PENDING: 'PENDING', // รออนุมัติจาก admin
 };
 
+// ── Allow-list ผู้รับข้อความที่ส่งหาหลายคน (alert, สรุปประจำวัน) ───────────────────
+// ห้ามเขียนแบบ "ยกเว้น PENDING" — role ที่ไม่รู้จัก/ว่าง/พิมพ์ผิดจะหลุดเข้าไป ต้องระบุเฉพาะ role ที่อนุญาตเท่านั้น
+// (เคยพลาดมาแล้ว: pushToUsers ส่ง alert สูง/วิกฤตให้ทุกคนในไฟล์รวมถึง PENDING)
+const APPROVED_ROLES = [ROLES.ADMIN, ROLES.IT_STAFF, ROLES.VIEWER]; // ผ่านการอนุมัติแล้วทุกระดับ
+const IT_ROLES = [ROLES.ADMIN, ROLES.IT_STAFF];                      // ทีม IT (alert ระดับต่ำกว่า high)
+const ALERT_BROADCAST_MIN_SEVERITY = 4;                              // high/disaster → แจ้งทุกคนที่อนุมัติแล้ว
+
 // สิทธิ์ของแต่ละ role (เรียงจากสูงสุดไปต่ำสุด)
 const ROLE_HIERARCHY = [ROLES.ADMIN, ROLES.IT_STAFF, ROLES.VIEWER, ROLES.PENDING];
 
@@ -158,6 +165,9 @@ module.exports = {
   PENDING_RATE_LIMIT,
   AI_CONFIG,
   ROLES,
+  APPROVED_ROLES,
+  IT_ROLES,
+  ALERT_BROADCAST_MIN_SEVERITY,
   ROLE_HIERARCHY,
   COMMAND_PERMISSIONS,
 };

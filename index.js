@@ -17,6 +17,7 @@ const validator = require('./services/validator');
 const { correlate } = require('./services/correlate');
 const statsService = require('./services/stats');
 const statsDetail  = require('./services/stats-detail');
+const pushTargets  = require('./services/push-targets');
 const dailySummary = require('./services/daily-summary');
 
 const setupAuth   = require('./middleware/setupAuth');
@@ -1521,25 +1522,12 @@ async function handleZabbixPush(body) {
 }
 
 // ── Push Message ให้ผู้ใช้ตาม Role ──────────────────────────────────────────
-async function pushToUsers(text, severity, flex = null) {
-  const users = auth.listUsers();
-  const targets = users.filter((u) => {
-    if (severity >= 4) return true;           // วิกฤต/สูง → แจ้งทุกคน
-    return ['ADMIN', 'IT_STAFF'].includes(u.role); // Warning → เฉพาะ IT+
-  });
-
-  for (const user of targets) {
-    try {
-      if (flex) {
-        await lineClient.pushMessage({ to: user.id, messages: [{ type: 'flex', altText: '🚨 แจ้งเตือนระบบ', contents: flex }] });
-      } else if (text) {
-        await lineClient.pushMessage({ to: user.id, messages: [{ type: 'text', text }] });
-      }
-    } catch (err) {
-      logger.error(`pushToUsers: userId=${user.id}`, err);
-    }
-  }
-}
+// เลือกผู้รับแบบ allow-list ใน services/push-targets.js (PENDING/role แปลกๆ ไม่ได้รับ ทุก severity) — อย่าเขียน filter เองที่นี่
+const pushToUsers = pushTargets.createAlertPusher({
+  listUsers: auth.listUsers,
+  send: (to, message) => lineClient.pushMessage({ to, messages: [message] }),
+  logger,
+});
 
 // ── สรุปปัญหาประจำวัน (08:00 / 17:00 เวลาไทย) ──────────────────────────────────
 function runDailySummary(opts = {}) {
