@@ -102,6 +102,15 @@ describe('buildDetail() — dependency ปลอม', () => {
     expect(hik.getEventRecords).toHaveBeenCalledWith({ startMs: (NOW - 600) * 1000, endMs: NOW * 1000, eventTypes: [1] });
   });
 
+  it('eventsSince แยกจาก since: traffic ใช้ since, event ใช้ eventsSince', async () => {
+    const omada = omadaOk(); const hik = hikOk();
+    const d = await buildDetail({ monitorKeys: ['omada', 'hikcentral'], omada, hikcentral: hik, since: NOW - 300, eventsSince: NOW - 1800, eventTypes: [1], now: NOW });
+    expect(omada.getTrafficActivities).toHaveBeenCalledWith(NOW - 300, NOW);
+    expect(hik.getEventRecords).toHaveBeenCalledWith({ startMs: (NOW - 1800) * 1000, endMs: NOW * 1000, eventTypes: [1] });
+    expect(d.windowSec).toBe(300);
+    expect(d.hikcentral.windowSec).toBe(1800);
+  });
+
   it('section เดียวพัง → section อื่นยังอยู่ + partial', async () => {
     const omada = omadaOk();
     omada.getTrafficActivities.mockRejectedValue(new Error('boom'));

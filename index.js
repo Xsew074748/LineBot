@@ -285,13 +285,14 @@ app.get('/stats', async (req, res) => {
 
 // ── /stats/detail — ข้อมูลละเอียด Omada/HikCentral ให้ NetGuard Manager poll ทุก 5 นาที ─────────
 // มี MAC/ชื่อ client และชื่อกล้อง → จำกัดเฉพาะ LAN/Docker network (lanOnly) ต่างจาก /stats ที่มีแต่ตัวเลขรวม
-// ?since=<Unix วินาที> = ต้นหน้าต่างของ traffic/event (Manager ส่งเวลารอบก่อนที่สำเร็จ; จำกัดย้อนหลังไม่เกิน 1 ชม.)
-// cache ต่อค่า since 60 วินาที (10 วินาทีเมื่อ partial) กัน poll ซ้ำยิง upstream
+// ?since=<Unix วินาที> = ต้นหน้าต่าง traffic ของ Omada, ?eventsSince= = ต้นหน้าต่าง event ของ HikCentral
+// (Manager ส่งเวลารอบก่อนที่สำเร็จของแต่ละฝั่ง; จำกัดย้อนหลังไม่เกิน 1 ชม.)
+// cache ต่อคู่ค่า since 60 วินาที (10 วินาทีเมื่อ partial) กัน poll ซ้ำยิง upstream
 const DETAIL_CACHE_TTL_MS         = 60 * 1000;
 const DETAIL_PARTIAL_CACHE_TTL_MS = 10 * 1000;
 const detailCache = new Map(); // since → { data, expireAt }
 app.get('/stats/detail', setupAuth.lanOnly, async (req, res) => {
-  const key = String(req.query.since || '');
+  const key = `${req.query.since || ''}|${req.query.eventsSince || ''}`;
   const hit = detailCache.get(key);
   if (hit && Date.now() < hit.expireAt) return res.json(hit.data);
   try {
@@ -300,6 +301,7 @@ app.get('/stats/detail', setupAuth.lanOnly, async (req, res) => {
       omada,
       hikcentral,
       since: req.query.since,
+      eventsSince: req.query.eventsSince,
       eventTypes: statsDetail.parseEventTypes(process.env.HIKCENTRAL_EVENT_TYPES),
     });
     if (detailCache.size >= 5) detailCache.clear();

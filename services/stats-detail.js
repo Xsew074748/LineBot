@@ -137,14 +137,17 @@ function resolveWindow(since, nowSec) {
 
 // deps:
 //   monitorKeys — monitor ที่ enabled; omada / hikcentral — service module หรือ null
-//   since       — Unix วินาที (รอบ poll ก่อนหน้าที่สำเร็จ) ใช้เป็นต้นหน้าต่างของ traffic/event
+//   since       — Unix วินาที (รอบก่อนหน้าที่ traffic ของ Omada ดึงสำเร็จ) = ต้นหน้าต่าง traffic
+//   eventsSince — เหมือนกันแต่สำหรับ event ของ HikCentral (ไม่ส่ง = ใช้ since) — แยกกันเพื่อให้ฝั่งหนึ่งพัง
+//                 แล้วอีกฝั่งไม่ต้องดึงหน้าต่างซ้ำ/นับซ้ำ
 //   eventTypes  — array รหัสชนิด event ของ HikCentral (ว่าง = ไม่ดึง event และบอก eventsUnavailable)
 //   now         — ฉีดเวลาได้เพื่อ test (Unix วินาที)
 async function buildDetail({
-  monitorKeys = [], omada = null, hikcentral = null, since = null, eventTypes = [],
+  monitorKeys = [], omada = null, hikcentral = null, since = null, eventsSince = null, eventTypes = [],
   now = Math.floor(Date.now() / 1000), timeoutMs = DEFAULT_TIMEOUT_MS, hikTimeoutMs = HIK_TIMEOUT_MS,
 } = {}) {
   const { sinceSec, windowSec } = resolveWindow(since, now);
+  const ev = resolveWindow(eventsSince ?? since, now);
   const detail = { ok: true, timestamp: new Date(now * 1000).toISOString(), monitors: monitorKeys, windowSec, sinceSec };
   const failed = new Set();
 
@@ -184,9 +187,9 @@ async function buildDetail({
     } else {
       try {
         const r = await withTimeout(
-          hikcentral.getEventRecords({ startMs: sinceSec * 1000, endMs: now * 1000, eventTypes }),
+          hikcentral.getEventRecords({ startMs: ev.sinceSec * 1000, endMs: now * 1000, eventTypes }),
           hikTimeoutMs);
-        Object.assign(h, summarizeEvents(r.records, r.truncated));
+        Object.assign(h, summarizeEvents(r.records, r.truncated), { windowSec: ev.windowSec });
       } catch (err) {
         failed.add('hikcentral');
         h.eventsUnavailable = 'fetch-failed';
