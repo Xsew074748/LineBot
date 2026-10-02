@@ -1,36 +1,11 @@
 services:
 
-  # ── IT Monitor Bot ──────────────────────────────────────
-  # ใช้ image จาก Docker Hub — แก้โค้ดแล้วต้อง build+push ใหม่:
-  #   docker build -t phattadol358/netguard-ai:latest . && docker push phattadol358/netguard-ai:latest
-  #   docker compose up -d --pull always
-  line-bot:
-    image: phattadol358/netguard-ai:latest
-    container_name: it-monitor-bot
-    restart: always
-
-    # ภายนอก 3100 → ภายใน container 3000 (PORT ใน .env)
-    ports:
-      - ":3000"
-
-    # โหลด .env จากไฟล์ (ไม่ hardcode ค่าใน compose)
-    env_file:
-      - .env
-
-    volumes:
-      # ข้อมูล Runtime — เก็บถาวรนอก container (users.json, notified_alerts.json)
-      - ./data:/app/data
-      # Log files
-      - ./logs:/app/logs
-      # Mount .env เข้า container ด้วย — จำเป็นสำหรับ middleware/setupAuth.js
-      # ซึ่งอ่านไฟล์ .env โดยตรงเพื่อดึง SETUP_PASSWORD_HASH
-      - ./.env:/app/.env
-      # CA cert สำหรับ Omada self-signed TLS (optional)
-      # ถ้าใช้: uncomment แล้วตั้ง OMADA_CA_CERT_PATH=/certs/omada-ca.crt ใน .env
-      # - ./certs:/certs:ro
-
-    networks:
-      - bot-net
+  # ── IT Monitor Bot (it-monitor-bot / service line-bot) — ปลดระวางแล้ว (2026-10-02) ──
+  # production ย้ายไปเป็น bot ที่ NetGuard Manager คุม: container "netguard-itmonitor"
+  # (ข้อมูลอยู่ที่ D:/Project Code/bots/itmonitor, ingress ใน ~/.cloudflared/config.yml ชี้ไป http://netguard-itmonitor:3000)
+  # ตัดบริการ line-bot ออกจากไฟล์นี้เพื่อไม่ให้ `docker compose up -d` สร้างตัวเก่ากลับมารันคู่กัน
+  # (ตัวเก่ายังเหลือเป็น container ที่หยุดอยู่ ชื่อ it-monitor-bot, restart policy = no — ใช้ rollback ฉุกเฉินเท่านั้น)
+  # เก็บ service เดิมไว้ใน git history (commit ก่อนหน้า) ถ้าต้องกู้คืน
 
   # ── Cloudflare Tunnel ────────────────────────────────────
   # ⚠️ ก่อน docker compose up ครั้งแรก:
@@ -43,8 +18,6 @@ services:
     image: cloudflare/cloudflared:latest
     container_name: it-monitor-cloudflared
     restart: always
-    depends_on:
-      - line-bot
     volumes:
       - C:/Users/phatt/.cloudflared:/etc/cloudflared:ro
     # token mode auth + config.yml สำหรับ ingress (locally-managed tunnel, ตั้ง route ใน Dashboard ไม่ได้)
@@ -53,7 +26,11 @@ services:
       - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
     networks:
       - bot-net
+      # เข้า netguard-net ด้วย เพื่อเรียก netguard-itmonitor (bot ที่ Manager คุม) ตาม ingress ใน config.yml
+      - netguard-net
 
 networks:
   bot-net:
     driver: bridge
+  netguard-net:
+    external: true
