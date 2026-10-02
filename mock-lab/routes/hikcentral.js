@@ -70,7 +70,16 @@ module.exports = function hikRoutes(holder, cfg) {
 
   router.post('/artemis/api/resource/v1/cameras', (req, res) => {
     holder.log('hikcentral', 'cameras');
-    ok(res, paged(cameraRecords(holder.state), req.body || {}));
+    const body = req.body || {};
+    const all = cameraRecords(holder.state);
+    // fault 'overlap': หน้าที่ 2 เป็นต้นไปเริ่มเร็วไป 1 ตัว (เหมือนมีกล้องถูกเพิ่ม/ลบระหว่างไล่หน้า) → กล้องที่ปลายหน้าก่อนหน้าโผล่ซ้ำ
+    if (holder.faults && holder.faults.hikcentral === 'overlap') {
+      const size = Math.min(Math.max(parseInt(body.pageSize, 10) || 20, 1), 500);
+      const no = Math.max(parseInt(body.pageNo, 10) || 1, 1);
+      const start = no === 1 ? 0 : (no - 1) * size - 1;
+      return ok(res, { total: all.length, pageNo: no, pageSize: size, list: all.slice(start, start + size) });
+    }
+    return ok(res, paged(all, body));
   });
 
   router.post('/artemis/api/resource/v1/regions', (req, res) => {

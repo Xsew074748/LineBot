@@ -2,6 +2,8 @@
 // สร้างข้อมูลสรุปสำหรับ endpoint /stats — ให้ NetGuard Manager poll เก็บสถิติ
 // เป็น pure function รับ dependency เข้ามา (ไม่ผูกกับ index.js) เพื่อ unit test ได้ง่าย
 
+const { mergeSystems } = require('./camera-identity');
+
 const DEFAULT_TIMEOUT_MS = 4000; // เผื่อ overhead ให้ตอบทันภายใน 5 วินาทีตามที่กำหนด
 
 function withTimeout(promise, ms) {
@@ -77,7 +79,8 @@ async function buildStats({ monitorKeys = [], zabbix = null, omada = null, hikce
   }
 
   if (zabbix || hikcentral) {
-    const cams = [...val('zCameras', []), ...val('hikCameras', [])];
+    // กล้องตัวเดียวที่อยู่ทั้ง Zabbix และ HikCentral นับครั้งเดียว (ดู services/camera-identity.js)
+    const cams = mergeSystems({ zabbix: val('zCameras', []), hikcentral: val('hikCameras', []) });
     stats.devices = stats.devices || {};
     stats.devices.cameras = countUpDown(cams, (c) => (c.available !== undefined ? c.available === 1 : c.online === true));
   }

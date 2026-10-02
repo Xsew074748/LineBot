@@ -87,9 +87,23 @@ function summarize(data) {
     const r = data[src];
     if (!r) continue;
     if (!r.ok) { warnings.push(`${label}: ${r.error}`); continue; }
+    // กล้อง HikCentral: ซ้ำกันภายใน HikCentral ตัดด้วย index code (ชื่อซ้ำแต่รหัสต่างคือคนละตัว ต้องแสดงทั้งคู่);
+    // ซ้ำกับ Zabbix/Omada ที่รายงานไปแล้ว ตัดด้วยชื่อแบบ 1:1 (Zabbix ไม่มีรหัส Hik ให้เทียบ) ดู services/camera-identity.js
+    const preSeen = src === 'hikcentral' ? new Set(seen) : null;
+    const consumed = new Set();
+    const codes = new Set();
+    const uncodedNames = new Set(); // ไม่มี index code เลย → แยกกันได้แค่ด้วยชื่อ (fallback ภายใน HikCentral)
     for (const d of r.value) {
-      if (seen.has(key(d.name))) continue;
-      seen.add(key(d.name));
+      if (src === 'hikcentral') {
+        const code = d.id === undefined || d.id === null ? '' : String(d.id).trim();
+        const k = key(d.name);
+        if (code) { if (codes.has(code)) continue; codes.add(code); }
+        else { if (uncodedNames.has(k)) continue; uncodedNames.add(k); }
+        if (preSeen.has(k) && !consumed.has(k)) { consumed.add(k); continue; }
+      } else {
+        if (seen.has(key(d.name))) continue;
+        seen.add(key(d.name));
+      }
       ongoing.push({ source: label, name: d.name, detail: src === 'omada' ? `${d.type || 'อุปกรณ์'} ออฟไลน์` : 'กล้องออฟไลน์', snapshot: true });
     }
   }

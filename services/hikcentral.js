@@ -163,16 +163,29 @@ async function getRegionMap() {
 
 // ── ดึงกล้องทั้งหมด ───────────────────────────────────────────────────────────
 // artemis จำกัด pageSize ไม่เกิน 500 — ถ้าขอมากกว่านั้นไล่ดึงทีละหน้าจนครบ
+const CAMERA_MAX_PAGES = 20;
+
 async function getCameras(pageNo = 1, pageSize = 100) {
   const per = Math.min(pageSize, 500);
   const all = [];
+  const seenCodes = new Set(); // index code ที่ได้แล้ว — หน้าที่ซ้อนกัน (กล้องถูกเพิ่ม/ลบระหว่างไล่หน้า) ต้องไม่ทำให้นับซ้ำ
   let page  = pageNo;
-  while (all.length < pageSize) {
+  for (let n = 0; all.length < pageSize && n < CAMERA_MAX_PAGES; n++) {
     const data = await hikPost('/artemis/api/resource/v1/cameras', { pageNo: page, pageSize: per });
     const list = data?.list || [];
-    all.push(...list);
+    let added = 0;
+    for (const cam of list) {
+      const code = cameraCodeOf(cam);
+      if (code) {
+        if (seenCodes.has(code)) continue;
+        seenCodes.add(code);
+      }
+      all.push(cam);
+      added++;
+    }
     const total = Number(data?.total ?? 0);
-    if (list.length < per || (total && all.length >= total)) break;
+    // นับ "ตัวที่ไม่ซ้ำ" เทียบ total (เดิมนับรวมที่ซ้ำ ทำให้หยุดไล่หน้าเร็วเกินไปแล้วกล้องท้ายๆ หาย)
+    if (list.length < per || (total && all.length >= total) || added === 0) break;
     page += 1;
   }
   const regionMap = await getRegionMap();
@@ -233,6 +246,12 @@ const isoWithOffset = (ms) => new Date(ms).toISOString().replace(/\.\d+Z$/, '+00
 const cameraCodeCache = { codes: null, expireAt: 0 };
 
 // cameraIndexCode ของทุกกล้อง (cache 10 นาที — ถ้าดึงใหม่ไม่ได้ใช้ของเดิม ไม่มีเลยค่อย throw)
+// index code ของกล้องใน record ของ artemis (null ถ้าไม่มี)
+function cameraCodeOf(cam) {
+  const id = cam && (cam.cameraIndexCode || cam.indexCode);
+  return id ? String(id).trim() : null;
+}
+
 async function getCameraIndexCodes() {
   if (cameraCodeCache.codes && Date.now() < cameraCodeCache.expireAt) return cameraCodeCache.codes;
   try {
@@ -240,7 +259,7 @@ async function getCameraIndexCodes() {
     for (let page = 1; page <= 20; page++) {
       const data = await hikPost('/artemis/api/resource/v1/cameras', { pageNo: page, pageSize: 500 });
       const list = data?.list || [];
-      for (const c of list) { const id = c.cameraIndexCode || c.indexCode; if (id) codes.push(String(id)); }
+      for (const c of list) { const id = cameraCodeOf(c); if (id && !codes.includes(id)) codes.push(id); } // ไม่ใส่รหัสซ้ำ (หน้าซ้อนกัน)
       const total = Number(data?.total ?? 0);
       if (list.length < 500 || (total && codes.length >= total)) break;
     }

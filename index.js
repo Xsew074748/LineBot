@@ -18,6 +18,7 @@ const { correlate } = require('./services/correlate');
 const statsService = require('./services/stats');
 const statsDetail  = require('./services/stats-detail');
 const pushTargets  = require('./services/push-targets');
+const cameraIdentity = require('./services/camera-identity');
 const omadaTrafficAlert = require('./services/omada-traffic-alert');
 const dailySummary = require('./services/daily-summary');
 
@@ -1292,11 +1293,15 @@ async function route(text, rawText, userId, replyToken) {
 
 // ── ดึงกล้องจากทุก Monitor ที่ enabled ───────────────────────────────────────
 async function getAllCameras() {
-  const results = await Promise.allSettled([
+  const [z, h] = await Promise.allSettled([
     zabbix     ? zabbix.getCameras()            : Promise.resolve([]),
     hikcentral ? hikcentral.getCameras(1, 1000) : Promise.resolve([]), // ดึงครั้งเดียว
   ]);
-  return results.flatMap((r) => r.status === 'fulfilled' ? r.value : []);
+  // กล้องตัวเดียวที่อยู่ทั้งสองระบบแสดง/นับครั้งเดียว (Zabbix ก่อน) — ระบบที่ดึงไม่ได้ข้ามไปเหมือนเดิม
+  return cameraIdentity.mergeSystems({
+    zabbix:     z.status === 'fulfilled' ? z.value : [],
+    hikcentral: h.status === 'fulfilled' ? h.value : [],
+  });
 }
 
 // Cache wrapper — คืน cached data ถ้าไม่ถึง 2 นาที ลด API call เมื่อมีกล้องเยอะ

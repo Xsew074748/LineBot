@@ -14,7 +14,8 @@ const path = require('path');
 const babel = require('@babel/parser');
 
 const ROOT = path.join(__dirname, '..', '..');
-const INDEX_SRC = fs.readFileSync(path.join(ROOT, 'index.js'), 'utf8');
+// ตัด CR ออก: บน Windows (autocrlf) ไฟล์เป็น CRLF แต่ needle ของ drift check เขียนด้วย LF — ไม่งั้นล้มทุกครั้งที่ checkout ใหม่
+const INDEX_SRC = fs.readFileSync(path.join(ROOT, 'index.js'), 'utf8').replace(/\r\n/g, '\n');
 
 // ── 1) ตัดฟังก์ชัน/ค่าคงที่ระดับบนสุดจาก index.js ────────────────────────────────
 function extractTopLevel(names) {
@@ -120,7 +121,9 @@ function loadBot(mockBase, mockCfg) {
 
   // sandbox ของฟังก์ชันที่ตัดจาก index.js
   const src = extractTopLevel(EXTRACTED).join('\n');
-  const ext = new Function('omada', 'zabbix', 'hikcentral', 'logger', `${src}\nreturn { CAMERA_SITES, getCameraSite, isCamOnline, camIp, apHasIssue, sameSubnet, cameraCache, getAllCameras, getCamerasWithCache, gatherAnalyzeContext, buildCameraAnalysisContext };`)(omada, zabbix, hikcentral, SILENT_LOGGER);
+  // cameraIdentity: getAllCameras ใน index.js เรียกผ่านโมดูลนี้ (dedup กล้องข้ามระบบ) — ต้องส่งเข้า sandbox ด้วย
+  const cameraIdentity = require(path.join(ROOT, 'services', 'camera-identity'));
+  const ext = new Function('omada', 'zabbix', 'hikcentral', 'logger', 'cameraIdentity', `${src}\nreturn { CAMERA_SITES, getCameraSite, isCamOnline, camIp, apHasIssue, sameSubnet, cameraCache, getAllCameras, getCamerasWithCache, gatherAnalyzeContext, buildCameraAnalysisContext };`)(omada, zabbix, hikcentral, SILENT_LOGGER, cameraIdentity);
 
   const config = require(path.join(ROOT, 'config'));
   const correlate = require(path.join(ROOT, 'services', 'correlate')).correlate || require(path.join(ROOT, 'services', 'correlate'));

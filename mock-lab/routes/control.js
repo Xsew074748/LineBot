@@ -18,11 +18,11 @@ module.exports = function controlRoutes(holder) {
     };
   };
 
-  // ฉีดความผิดพลาดของระบบภายนอก (ไว้ทดสอบ circuit breaker/timeout)   body: { system: 'hikcentral', mode: 'hang' | 'error500' | 'ok' }
+  // ฉีดความผิดพลาดของระบบภายนอก (ไว้ทดสอบ circuit breaker/timeout)   body: { system: 'hikcentral', mode: 'hang' | 'error500' | 'overlap' | 'ok' }
   router.post('/mock/fault', (req, res) => {
     const { system, mode } = req.body || {};
-    if (system !== 'hikcentral' || !['hang', 'error500', 'ok'].includes(mode)) {
-      return bad(res, new Error("system ต้องเป็น 'hikcentral' และ mode เป็น hang | error500 | ok"));
+    if (system !== 'hikcentral' || !['hang', 'error500', 'overlap', 'ok'].includes(mode)) {
+      return bad(res, new Error("system ต้องเป็น 'hikcentral' และ mode เป็น hang | error500 | overlap | ok"));
     }
     if (mode === 'ok') delete holder.faults[system]; else holder.faults[system] = mode;
     return res.json({ ok: true, faults: holder.faults });

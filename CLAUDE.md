@@ -26,6 +26,14 @@
   อย่าใส่ backtick ในสตริงของ node -e (bash รันเป็นคำสั่ง) ให้เขียนสคริปต์เป็นไฟล์แทน
 - /test-connection (POST) ใช้ค่าที่ส่งมาตรงๆ ยิงออกไปยัง URL ที่รับมา → จำกัดเฉพาะ LAN (setupAuth.lanOnly) กัน SSRF
 
+## Dedup กล้อง (services/camera-identity.js)
+- ข้อมูลจริง (ตรวจ 2026-10-02): HikCentral 68 กล้อง index code ครบ/ไม่ซ้ำ; Zabbix 5 host; ทับกันข้ามระบบ 0; **Zabbix ไม่มีรหัส Hik เก็บที่ใดเลย** (ไม่มี inventory/tag/macro) และ list กล้องของ Hik ไม่มี IP → จับคู่ข้ามระบบด้วยรหัสล้วนไม่ได้
+- ภายใน HikCentral: ใช้ index code (ชื่อซ้ำแต่รหัสต่าง = คนละตัว) — getCameras ตัดหน้าที่ซ้อนกัน (เดิมนับตัวซ้ำเข้า total แล้วหยุดไล่หน้าเร็ว กล้องท้ายๆ หาย), getCameraIndexCodes ไม่ใส่รหัสซ้ำ
+- ข้ามระบบ (getAllCameras, /stats, daily summary): รหัสก่อน (ถ้ากล้อง Zabbix มี `hikIndexCode` — ตอนนี้ไม่มีใครตั้ง; ยังไม่ได้เพิ่ม selectTags) แล้ว fallback ชื่อ normalize แบบ 1:1; Zabbix มาก่อน (ชื่อ/สถานะฝั่ง Zabbix ถูกเก็บ)
+- key มี prefix ระบบเสมอ (`hik:` / `zbx:`) — hostid ของ Zabbix กับ index code ของ Hik เป็นเลขเหมือนกันได้
+- ผลต่อผู้ใช้: ข้อมูลจริงตอนนี้เท่าเดิม (68 + 5 = 73); กล้องที่อยู่ทั้งสองระบบจะนับ/แสดงครั้งเดียว (บันทึก "กล้องที่อยู่ทั้งสองระบบถูกนับซ้ำ" ในหัวข้อ ai-comparison ด้านล่าง **แก้แล้ว** — 34 เคสของ ai-comparison ไม่ได้รับผลเพราะเคสที่มีกล้องทั้งสองระบบใช้เส้นทาง alert)
+- ai-comparison/tools/bot-context.js: ส่ง cameraIdentity เข้า sandbox ของ getAllCameras และตัด CR ก่อนเทียบ drift (บน Windows index.js เป็น CRLF จึงเคยล้มทุกครั้งหลัง git checkout/stash)
+
 ## Circuit breaker ของ HikCentral (services/circuit-breaker.js, ครอบที่ hikPost จุดเดียว)
 - ล้มเหลวติดกัน 3 ครั้ง (timeout / เครือข่ายขาด / HTTP 5xx) → เปิด 60 วินาที (คำขอล้มทันที ไม่รอ 10 วินาที) → ลอง 1 คำขอ → ปิดเมื่อสำเร็จ;
   ปรับด้วย HIKCENTRAL_BREAKER_THRESHOLD / HIKCENTRAL_BREAKER_COOLDOWN_MS (และ HIKCENTRAL_TIMEOUT_MS สำหรับ timeout ต่อคำขอ)
@@ -48,7 +56,7 @@
 - ai-comparison/ — ทดลองเปรียบเทียบ Claude/GPT/Gemini 34 เคส สำหรับเล่มสหกิจศึกษา: เฉลยเขียนก่อนรัน (freeze ที่ commit 4543d3b),
   rubric ให้คะแนนด้วยมือแบบปกปิดชื่อ, runner = ai-comparison/tools/run-comparison.js (ดู README ในโฟลเดอร์)
   ข้อควรรู้ของบอทที่พบตอนทำ: correlation ไม่รวมอุปกรณ์ Omada (zone "ไม่ระบุ") และส่ง AI เฉพาะกลุ่ม high,
-  จับ subnet ของกล้องได้เฉพาะกล้องที่อยู่ใน Zabbix, กล้องที่อยู่ทั้งสองระบบถูกนับซ้ำ, "กล้องดับ" (Zabbix) อาจขัดกับ "กล้อง" (HikCentral)
+  จับ subnet ของกล้องได้เฉพาะกล้องที่อยู่ใน Zabbix, กล้องที่อยู่ทั้งสองระบบถูกนับซ้ำ (ตอนทำการทดลอง — แก้แล้ว 2026-10-02 ดูหัวข้อ "Dedup กล้อง"), "กล้องดับ" (Zabbix) อาจขัดกับ "กล้อง" (HikCentral)
 - ทดสอบ webhook LINE โดยไม่ส่งข้อความจริง: ส่ง event ที่เซ็น HMAC ด้วย LINE_CHANNEL_SECRET เข้า container แยก
   แล้วดักที่ชั้น @line/bot-sdk (preload) — ห้ามยิงเข้า production webhook ด้วย replyToken ปลอม (push จริงถึง ADMIN ได้)
 
