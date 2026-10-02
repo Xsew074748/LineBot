@@ -28,24 +28,108 @@ describe('daily-summary / เวลาไทยและ cron', () => {
     expect(ds.clockTH(Date.parse('2026-10-02T10:00:00Z'))).toBe('17:00');
   });
 
-  test('startSchedule: 08:00 และ 17:00 ด้วย timezone Asia/Bangkok ระบุตรงๆ', () => {
+  const mkCron = () => {
     const cron = require('node-cron');
-    const spy = jest.spyOn(cron, 'schedule').mockReturnValue({ stop: jest.fn() });
-    ds.startSchedule(jest.fn(), mkLogger());
-    expect(spy).toHaveBeenCalledWith('0 8,17 * * *', expect.any(Function), { timezone: 'Asia/Bangkok' });
-    expect(cron.validate('0 8,17 * * *')).toBe(true);
+    const stops = [];
+    const spy = jest.spyOn(cron, 'schedule').mockImplementation((expr, fn, opts) => { const task = { expr, fn, opts, stop: jest.fn() }; stops.push(task); return task; });
+    return { cron, spy, stops };
+  };
+
+  test('ค่าเริ่มต้น: 08:00 และ 17:00 → cron "0 8 * * *" และ "0 17 * * *" ด้วย timezone Asia/Bangkok ระบุตรงๆ', () => {
+    const { cron, spy, stops } = mkCron();
+    const s = ds.createScheduler({ runFn: jest.fn(), logger: mkLogger(), loadTimes: () => ({ ok: true, times: ds.DEFAULT_TIMES }) });
+    const cur = s.start();
+    expect(stops.map((x) => x.expr)).toEqual(['0 8 * * *', '0 17 * * *']);
+    expect(stops.every((x) => x.opts.timezone === 'Asia/Bangkok')).toBe(true);
+    expect(stops.every((x) => cron.validate(x.expr))).toBe(true);
+    expect(cur.times).toEqual(['08:00', '17:00']);
     spy.mockRestore();
   });
 
-  test('startSchedule: runFn โยน error → log แล้วไม่ล้ม', async () => {
-    const cron = require('node-cron');
-    let task;
-    const spy = jest.spyOn(cron, 'schedule').mockImplementation((e, fn) => { task = fn; return {}; });
+  test('reload: หยุด task เก่าทุกตัวแล้วตั้งใหม่ตามเวลาที่เปลี่ยน (ไม่ต้อง restart)', () => {
+    const { spy, stops } = mkCron();
+    let times = ['08:00', '17:00'];
+    const s = ds.createScheduler({ runFn: jest.fn(), logger: mkLogger(), loadTimes: () => ({ ok: true, times }) });
+    s.start();
+    const old = [...stops];
+    times = ['07:30', '12:05', '20:45'];
+    const r = s.reload();
+    expect(old.every((x) => x.stop.mock.calls.length === 1)).toBe(true);
+    expect(stops.slice(2).map((x) => x.expr)).toEqual(['30 7 * * *', '5 12 * * *', '45 20 * * *']);
+    expect(r.ok).toBe(true);
+    expect(s.current().times).toEqual(['07:30', '12:05', '20:45']);
+    spy.mockRestore();
+  });
+
+  test('reload ด้วยค่าที่ใช้ไม่ได้ → คง schedule เดิม ไม่ไปทับด้วยค่าเริ่มต้น', () => {
+    const { spy, stops } = mkCron();
+    let res = { ok: true, times: ['09:00'] };
+    const s = ds.createScheduler({ runFn: jest.fn(), logger: mkLogger(), loadTimes: () => res });
+    s.start();
+    res = { ok: false, error: 'JSON พัง' };
+    const r = s.reload();
+    expect(r.ok).toBe(false);
+    expect(stops).toHaveLength(1);
+    expect(stops[0].stop).not.toHaveBeenCalled();
+    expect(s.current().times).toEqual(['09:00']);
+    spy.mockRestore();
+  });
+
+  test('start ตอนไฟล์พัง → ใช้ค่าเริ่มต้น + warn', () => {
+    const { spy } = mkCron();
     const logger = mkLogger();
-    ds.startSchedule(async () => { throw new Error('boom'); }, logger);
-    await expect(task()).resolves.toBeUndefined();
+    const s = ds.createScheduler({ runFn: jest.fn(), logger, loadTimes: () => ({ ok: false, error: 'x' }) });
+    expect(s.start().times).toEqual(['08:00', '17:00']);
+    expect(logger.warn).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  test('task ที่ถึงเวลา: เรียก runFn ด้วย label เวลานั้น และ runFn โยน error → log แล้วไม่ล้ม', async () => {
+    const { spy, stops } = mkCron();
+    const logger = mkLogger();
+    const runFn = jest.fn().mockRejectedValue(new Error('boom'));
+    ds.createScheduler({ runFn, logger, loadTimes: () => ({ ok: true, times: ['17:00'] }) }).start();
+    await expect(stops[0].fn()).resolves.toBeUndefined();
+    expect(runFn).toHaveBeenCalledWith('17:00');
     expect(logger.error).toHaveBeenCalled();
     spy.mockRestore();
+  });
+
+  test('nextRunAt: รอบถัดไปตามเวลาไทย (ข้ามวันได้)', () => {
+    expect(ds.nextRunAt(['08:00', '17:00'], Date.parse('2026-10-02T03:00:00Z'))).toBe('2026-10-02T10:00:00.000Z'); // 10:00 ไทย → 17:00 ไทย
+    expect(ds.nextRunAt(['08:00', '17:00'], Date.parse('2026-10-02T11:00:00Z'))).toBe('2026-10-03T01:00:00.000Z'); // 18:00 ไทย → 08:00 พรุ่งนี้
+  });
+});
+
+describe('daily-summary / validateTimes และอ่านจาก settings.json', () => {
+  const ds = require('../services/daily-summary');
+  const os = require('os'); const fsr = jest.requireActual('fs'); const pth = require('path');
+  const tmp = (content) => { const f = pth.join(os.tmpdir(), 'ds-settings-' + Math.random().toString(36).slice(2) + '.json'); if (content !== undefined) fsr.writeFileSync(f, content); return f; };
+  const tooMany = Array.from({ length: 25 }, (_, i) => String(i).padStart(2, '0') + ':' + (i < 24 ? '00' : '30'));
+
+  test('เวลาถูกต้อง → ผ่านและเรียงลำดับ', () => {
+    expect(ds.validateTimes(['17:00', '08:00', '00:00', '23:59'])).toEqual({ ok: true, times: ['00:00', '08:00', '17:00', '23:59'] });
+  });
+  test.each([
+    [['24:00'], /รูปแบบเวลาไม่ถูกต้อง/], [['8:00'], /รูปแบบเวลาไม่ถูกต้อง/], [['08:60'], /รูปแบบเวลาไม่ถูกต้อง/],
+    [['08:00 '], /รูปแบบเวลาไม่ถูกต้อง/], [['abc'], /รูปแบบเวลาไม่ถูกต้อง/], [[800], /รูปแบบเวลาไม่ถูกต้อง/], [[null], /รูปแบบเวลาไม่ถูกต้อง/],
+    [[], /อย่างน้อย 1/], ['08:00', /รายการ/], [undefined, /รายการ/],
+    [['08:00', '08:00'], /ซ้ำ/],
+    [tooMany, /ไม่เกิน/],
+  ])('ไม่ผ่าน %j', (input, re) => {
+    const r = ds.validateTimes(input);
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(re);
+  });
+  test('ไฟล์ไม่มี → ค่าเริ่มต้น; มี key → ใช้ค่านั้น; ไม่มี key → ค่าเริ่มต้น', () => {
+    expect(ds.readTimesFromFile(tmp()).times).toEqual(['08:00', '17:00']);
+    expect(ds.readTimesFromFile(tmp('{"dailySummaryTimes":["06:15","18:30"]}'))).toMatchObject({ ok: true, times: ['06:15', '18:30'], source: 'file' });
+    expect(ds.readTimesFromFile(tmp('{"other":1}')).times).toEqual(['08:00', '17:00']);
+  });
+  test('ไฟล์พัง/ค่าไม่ผ่าน validate → error (ไม่ crash)', () => {
+    expect(ds.readTimesFromFile(tmp('{bad')).ok).toBe(false);
+    expect(ds.readTimesFromFile(tmp('{"dailySummaryTimes":["25:00"]}')).ok).toBe(false);
+    expect(ds.readTimesFromFile(tmp('{"dailySummaryTimes":[]}')).ok).toBe(false);
   });
 });
 

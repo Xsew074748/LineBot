@@ -5,12 +5,19 @@
 //   Zabbix     — ประวัติจริงของวันนี้จาก event.get (r_eventid ≠ 0 = แก้แล้ว) + ปัญหาที่ยัง active ตั้งแต่เมื่อวาน
 //   Omada/Hik  — ได้แค่สถานะปัจจุบัน → แสดงเฉพาะที่ดับ ณ ตอนรันสรุป (ไม่มี "แก้แล้ว" ตลอดทั้งวัน)
 // แหล่งไหนดึงไม่ได้ต้องบอกในข้อความ — ห้ามสรุปว่า "ปกติ" ทั้งที่ข้อมูลไม่ครบ
+const fs = require('fs');
+const path = require('path');
 const cron = require('node-cron');
 
 const TZ = 'Asia/Bangkok';
 const BKK_OFFSET_MS = 7 * 60 * 60 * 1000; // ไทย UTC+7 ไม่มี DST
-// 08:00 และ 17:00 เวลาไทย — ระบุ timezone ให้ node-cron ตรงๆ จึงถูกต้องแม้ host/container เป็น UTC
-const SCHEDULE_EXPR = '0 8,17 * * *';
+// เวลาที่ตั้งค่าได้ (HH:mm เวลาไทยเสมอ) — ระบุ timezone ให้ node-cron ตรงๆ จึงถูกต้องแม้ host/container เป็น UTC
+// เก็บใน data/settings.json (volume เดียวกับ users.json → อยู่รอดหลัง recreate) key "dailySummaryTimes"
+// Manager เป็นผู้เขียนไฟล์ แล้วเรียก POST /api/daily-summary/reload ให้ bot ตั้ง cron ใหม่ทันทีโดยไม่ restart
+const DEFAULT_TIMES = ['08:00', '17:00'];
+const MAX_TIMES = 24;
+const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const SETTINGS_PATH = path.join(__dirname, '..', 'data', 'settings.json');
 const APPROVED_ROLES = ['ADMIN', 'IT_STAFF', 'VIEWER']; // ทุก role ที่ไม่ใช่ PENDING
 const MAX_PER_SECTION = 8;
 
@@ -164,13 +171,80 @@ async function run(deps, opts = {}) {
   return { summary, flex, sent, failed, recipients: recipients.length };
 }
 
-// ตั้งเวลา 08:00 และ 17:00 เวลาไทยทุกวัน — runFn โยน error ได้ (จับแล้ว log กันทำ process ล้ม)
-function startSchedule(runFn, logger) {
-  return cron.schedule(SCHEDULE_EXPR, async () => {
-    const label = clockTH(Date.now()).startsWith('08') ? '08:00' : '17:00';
-    try { await runFn(label); }
-    catch (err) { logger.error('daily-summary: รันตามเวลาล้มเหลว', err); }
-  }, { timezone: TZ });
+// ตรวจรายการเวลา: ต้องเป็น array ของ "HH:mm" (00:00–23:59) อย่างน้อย 1 ค่า ไม่ซ้ำ — คืน { ok, times (เรียงแล้ว) } หรือ { ok:false, error }
+function validateTimes(list) {
+  if (!Array.isArray(list)) return { ok: false, error: 'เวลาต้องเป็นรายการ (array) ของ HH:mm' };
+  if (list.length === 0) return { ok: false, error: 'ต้องมีเวลาอย่างน้อย 1 ค่า' };
+  if (list.length > MAX_TIMES) return { ok: false, error: `ตั้งได้ไม่เกิน ${MAX_TIMES} เวลา` };
+  for (const v of list) {
+    if (typeof v !== 'string' || !TIME_RE.test(v)) return { ok: false, error: `รูปแบบเวลาไม่ถูกต้อง: "${String(v).slice(0, 20)}" (ต้องเป็น HH:mm 24 ชม. 00:00–23:59)` };
+  }
+  const dup = list.find((v, idx) => list.indexOf(v) !== idx);
+  if (dup) return { ok: false, error: `เวลาซ้ำกัน: ${dup}` };
+  return { ok: true, times: [...list].sort() };
 }
 
-module.exports = { run, collect, summarize, buildFlex, startSchedule, startOfBangkokDay, clockTH, SCHEDULE_EXPR, TZ, APPROVED_ROLES };
+// อ่านเวลาจาก settings.json — ไฟล์ไม่มี/ไม่มี key = ค่าเริ่มต้น; ไฟล์พังหรือค่าไม่ผ่าน validate = error (ผู้เรียกตัดสินใจ)
+function readTimesFromFile(file = SETTINGS_PATH) {
+  let raw;
+  try { raw = fs.readFileSync(file, 'utf8'); }
+  catch (err) { return err.code === 'ENOENT' ? { ok: true, times: [...DEFAULT_TIMES], source: 'default' } : { ok: false, error: err.message }; }
+  let doc;
+  try { doc = JSON.parse(raw); } catch { return { ok: false, error: 'settings.json อ่านไม่ได้ (JSON พัง)' }; }
+  if (!doc || doc.dailySummaryTimes === undefined) return { ok: true, times: [...DEFAULT_TIMES], source: 'default' };
+  const v = validateTimes(doc.dailySummaryTimes);
+  return v.ok ? { ok: true, times: v.times, source: 'file' } : v;
+}
+
+// เวลา (ISO) ที่ cron รอบถัดไปจะยิง ตามเวลาไทย — ไว้แสดง/ตรวจสอบ
+function nextRunAt(times, nowMs = Date.now()) {
+  const day0 = startOfBangkokDay(nowMs);
+  let best = Infinity;
+  for (const t of times) {
+    const [h, m] = t.split(':').map(Number);
+    for (const add of [0, 24]) {
+      const at = day0 + add * 3600_000 + (h * 60 + m) * 60_000;
+      if (at > nowMs && at < best) best = at;
+    }
+  }
+  return best === Infinity ? null : new Date(best).toISOString();
+}
+
+// ตัวตั้งเวลา: แต่ละเวลา = cron 1 งาน ("M H * * *" ตามเขต Asia/Bangkok) — reload() หยุดงานเก่าทั้งหมดแล้วตั้งใหม่ (ไม่ต้อง restart)
+//   runFn(label) โยน error ได้ (จับแล้ว log กันทำ process ล้ม); loadTimes = () => ({ ok, times } | { ok:false, error })
+function createScheduler({ runFn, logger, loadTimes = readTimesFromFile }) {
+  let tasks = [];
+  let state = { times: [], exprs: [] };
+
+  function apply(times) {
+    for (const t of tasks) t.stop();
+    const exprs = times.map((v) => { const [h, m] = v.split(':').map(Number); return `${m} ${h} * * *`; });
+    tasks = times.map((label, i) => cron.schedule(exprs[i], async () => {
+      try { await runFn(label); }
+      catch (err) { logger.error('daily-summary: รันตามเวลาล้มเหลว', err); }
+    }, { timezone: TZ }));
+    state = { times, exprs };
+  }
+
+  return {
+    // ตอน start: ไฟล์พัง → ใช้ค่าเริ่มต้น (ดีกว่าไม่ส่งสรุปเลย) แล้ว warn
+    start() {
+      const r = loadTimes();
+      if (!r.ok) logger.warn(`daily-summary: อ่านเวลาตั้งค่าไม่ได้ (${r.error}) — ใช้ค่าเริ่มต้น ${DEFAULT_TIMES.join(', ')}`);
+      apply(r.ok ? r.times : [...DEFAULT_TIMES]);
+      logger.info(`daily-summary: scheduled ${state.times.join(', ')} (${state.exprs.join(' | ')}) tz=${TZ}`);
+      return this.current();
+    },
+    // ตอน reload: ค่าใหม่ใช้ไม่ได้ → คง schedule เดิมไว้ ไม่ไปทับด้วยค่าเริ่มต้น
+    reload() {
+      const r = loadTimes();
+      if (!r.ok) { logger.warn(`daily-summary: reload ไม่สำเร็จ (${r.error}) — คง schedule เดิม`); return { ok: false, error: r.error, ...this.current() }; }
+      apply(r.times);
+      logger.info(`daily-summary: rescheduled ${state.times.join(', ')} (${state.exprs.join(' | ')}) tz=${TZ}`);
+      return { ok: true, ...this.current() };
+    },
+    current() { return { times: [...state.times], exprs: [...state.exprs], timezone: TZ, nextRun: nextRunAt(state.times) }; },
+  };
+}
+
+module.exports = { run, collect, summarize, buildFlex, createScheduler, validateTimes, readTimesFromFile, nextRunAt, startOfBangkokDay, clockTH, DEFAULT_TIMES, SETTINGS_PATH, TZ, APPROVED_ROLES };

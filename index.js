@@ -1520,6 +1520,20 @@ function runDailySummary(opts = {}) {
   }, opts);
 }
 
+const dailyScheduler = dailySummary.createScheduler({
+  runFn: (label) => runDailySummary({ label }),
+  logger,
+});
+
+// Manager เขียน data/settings.json แล้วเรียก reload → ตั้ง cron ใหม่ทันที (ไม่ต้อง restart) — LAN เท่านั้น เหมือน /test-connection
+// GET = ดู schedule ที่ใช้อยู่จริง (ไว้ตรวจว่า reload แล้วจริง)
+app.get('/api/daily-summary/schedule', setupAuth.lanOnly, (req, res) => res.json({ ok: true, ...dailyScheduler.current() }));
+app.post('/api/daily-summary/reload', setupAuth.lanOnly, (req, res) => {
+  if (process.env.DAILY_SUMMARY_ENABLED === 'false') return res.status(409).json({ ok: false, error: 'สรุปประจำวันถูกปิดด้วย DAILY_SUMMARY_ENABLED=false' });
+  const result = dailyScheduler.reload();
+  res.status(result.ok ? 200 : 422).json(result);
+});
+
 // ── Start Server ───────────────────────────────────────────────────────────────
 const PORT = config.SERVER_CONFIG.port;
 app.listen(PORT, () => {
@@ -1532,8 +1546,5 @@ app.listen(PORT, () => {
     logger.info(`poller: offline camera poller started (interval=${OFFLINE_CAM_POLL_MS / 1000}s)`);
   }
 
-  if (process.env.DAILY_SUMMARY_ENABLED !== 'false') {
-    dailySummary.startSchedule((label) => runDailySummary({ label }), logger);
-    logger.info(`daily-summary: scheduled "${dailySummary.SCHEDULE_EXPR}" tz=${dailySummary.TZ}`);
-  }
+  if (process.env.DAILY_SUMMARY_ENABLED !== 'false') dailyScheduler.start();
 });
