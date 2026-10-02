@@ -16,6 +16,7 @@ const aiProviders = require('./services/ai-providers');
 const validator = require('./services/validator');
 const { correlate } = require('./services/correlate');
 const statsService = require('./services/stats');
+const statsDetail  = require('./services/stats-detail');
 const dailySummary = require('./services/daily-summary');
 
 const setupAuth   = require('./middleware/setupAuth');
@@ -280,6 +281,34 @@ app.get('/stats', async (req, res) => {
   statsCache.data     = stats;
   statsCache.expireAt = Date.now() + (stats.partial ? STATS_PARTIAL_CACHE_TTL_MS : STATS_CACHE_TTL_MS);
   res.json(stats);
+});
+
+// ── /stats/detail — ข้อมูลละเอียด Omada/HikCentral ให้ NetGuard Manager poll ทุก 5 นาที ─────────
+// มี MAC/ชื่อ client และชื่อกล้อง → จำกัดเฉพาะ LAN/Docker network (lanOnly) ต่างจาก /stats ที่มีแต่ตัวเลขรวม
+// ?since=<Unix วินาที> = ต้นหน้าต่างของ traffic/event (Manager ส่งเวลารอบก่อนที่สำเร็จ; จำกัดย้อนหลังไม่เกิน 1 ชม.)
+// cache ต่อค่า since 60 วินาที (10 วินาทีเมื่อ partial) กัน poll ซ้ำยิง upstream
+const DETAIL_CACHE_TTL_MS         = 60 * 1000;
+const DETAIL_PARTIAL_CACHE_TTL_MS = 10 * 1000;
+const detailCache = new Map(); // since → { data, expireAt }
+app.get('/stats/detail', setupAuth.lanOnly, async (req, res) => {
+  const key = String(req.query.since || '');
+  const hit = detailCache.get(key);
+  if (hit && Date.now() < hit.expireAt) return res.json(hit.data);
+  try {
+    const data = await statsDetail.buildDetail({
+      monitorKeys: Object.keys(enabledMonitors),
+      omada,
+      hikcentral,
+      since: req.query.since,
+      eventTypes: statsDetail.parseEventTypes(process.env.HIKCENTRAL_EVENT_TYPES),
+    });
+    if (detailCache.size >= 5) detailCache.clear();
+    detailCache.set(key, { data, expireAt: Date.now() + (data.partial ? DETAIL_PARTIAL_CACHE_TTL_MS : DETAIL_CACHE_TTL_MS) });
+    res.json(data);
+  } catch (err) {
+    logger.warn(`/stats/detail ล้มเหลว: ${err.message}`);
+    res.status(500).json({ ok: false, error: 'detail-failed' });
+  }
 });
 
 // ── /webhook endpoint ──────────────────────────────────────────────────────────

@@ -243,6 +243,41 @@ async function getAlerts(siteId = SITE_ID) {
   }
 }
 
+
+// ── ข้อมูลละเอียดสำหรับ /stats/detail (services/stats-detail.js) ─────────────────
+// ยืนยันกับ controller จริงแล้ว (อ่านอย่างเดียว):
+//   • GET .../clients มี clientStat ใน result (total, wireless, wired, num2g/5g/6g, numGuest ...)
+//   • GET .../dashboard/overview-diagram (totalPorts, availablePorts, powerConsumption, จำนวน AP/switch/client)
+//   • GET .../dashboard/traffic-activities?start&end (วินาที) → { apTrafficActivities[], switchTrafficActivities[] }
+// ยังไม่ยืนยัน: ชื่อ field ปริมาณ traffic ในแต่ละ bucket และ trafficDown/trafficUp ของ client
+//   (ไซต์ที่ใช้ probe ไม่มี client/traffic) — stats-detail.js เผื่อ fallback หลายชื่อ
+const CLIENT_DETAIL_MAX_PAGES = 10; // ไม่เกิน 1,000 client
+
+async function getClientOverview(siteId = SITE_ID) {
+  let stat = null;
+  const clients = [];
+  for (let page = 1; page <= CLIENT_DETAIL_MAX_PAGES; page++) {
+    const result = await omadaGet(
+      `/openapi/v1/${OMADAC_ID}/sites/${siteId}/clients?pageSize=${OMADA_PAGE_SIZE}&page=${page}`);
+    if (page === 1) stat = (result && !Array.isArray(result) && result.clientStat) || null;
+    const list = extractList(result);
+    clients.push(...list);
+    const total = Array.isArray(result) ? result.length : Number(result?.totalRows ?? 0);
+    if (list.length < OMADA_PAGE_SIZE || (total && clients.length >= total)) break;
+  }
+  return { stat, clients };
+}
+
+async function getDashboardOverview(siteId = SITE_ID) {
+  return omadaGet(`/openapi/v1/${OMADAC_ID}/sites/${siteId}/dashboard/overview-diagram`);
+}
+
+// startSec/endSec = Unix วินาที
+async function getTrafficActivities(startSec, endSec, siteId = SITE_ID) {
+  return omadaGet(
+    `/openapi/v1/${OMADAC_ID}/sites/${siteId}/dashboard/traffic-activities?start=${Math.floor(startSec)}&end=${Math.floor(endSec)}`);
+}
+
 // ── Health Check — GET /sites แล้วดู errorCode === 0 (omadaGet throw ถ้าไม่ใช่ 0) ──
 async function healthCheck() {
   try {
@@ -281,4 +316,4 @@ async function testConnection(baseUrl /*, username, password */) {
 }
 
 // http: axios instance ที่ฝัง httpsAgent ไว้แล้ว — ใช้ได้จากภายนอก (เช่น routes/config.js)
-module.exports = { requestToken, getToken, getAPs, getClients, getSwitchPorts, getAlerts, healthCheck, testConnection, http: omadaHttp };
+module.exports = { requestToken, getToken, getAPs, getClients, getSwitchPorts, getAlerts, getClientOverview, getDashboardOverview, getTrafficActivities, healthCheck, testConnection, http: omadaHttp };

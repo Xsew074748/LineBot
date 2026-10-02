@@ -194,6 +194,39 @@ async function getEvents(limit = 10) {
   }));
 }
 
+
+// ── Event ตามช่วงเวลา (ใช้กับ /stats/detail) ──────────────────────────────────
+// ยืนยันกับระบบจริง (อ่านอย่างเดียว): eventRecords/page บังคับ startTime (ISO8601 มี offset) และ
+// eventTypes (array ของรหัสชนิด event) — ขาดตัวใดตัวหนึ่งได้ code=2 "parameter error"
+// ยังไม่ยืนยัน: รหัส eventTypes ที่ถูกต้อง (สแกนช่วงที่เดาได้แล้วไม่ผ่าน) และชื่อ field ในแต่ละ record
+// → ต้องกำหนดรหัสเองผ่าน HIKCENTRAL_EVENT_TYPES (คั่นด้วย ,) ไม่เดาให้
+const EVENT_PAGE_SIZE = 500;
+const EVENT_MAX_PAGES = 5; // กันชน — ไม่เกิน 2,500 event ต่อรอบ
+const isoWithOffset = (ms) => new Date(ms).toISOString().replace(/\.\d+Z$/, '+00:00');
+
+async function getEventRecords({ startMs, endMs, eventTypes }) {
+  const all = [];
+  let truncated = false;
+  for (let page = 1; page <= EVENT_MAX_PAGES; page++) {
+    const data = await hikPost('/artemis/api/eventService/v1/eventRecords/page', {
+      pageNo: page, pageSize: EVENT_PAGE_SIZE,
+      startTime: isoWithOffset(startMs), endTime: isoWithOffset(endMs), eventTypes,
+    });
+    const list = data?.list || [];
+    all.push(...list);
+    const total = Number(data?.total ?? 0);
+    if (list.length < EVENT_PAGE_SIZE || (total && all.length >= total)) break;
+    if (page === EVENT_MAX_PAGES) truncated = true;
+  }
+  const records = all.map((e) => ({
+    name:       e.eventName || e.eventTypeName || e.srcName || 'N/A',
+    type:       e.eventType ?? null,
+    cameraId:   e.srcIndex || e.cameraIndexCode || null,
+    cameraName: e.srcName || e.cameraName || null,
+  }));
+  return { records, truncated };
+}
+
 // ── สถานะ online — artemis ใช้ status: 1 = online, 0 = offline ────────────────
 function isOnline(cam) {
   if (!cam) return false;
@@ -241,5 +274,6 @@ module.exports = {
   getCamerasByArea,
   getRegions,
   getEvents,
+  getEventRecords,
   healthCheck,
 };

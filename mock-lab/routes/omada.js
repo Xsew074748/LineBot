@@ -2,6 +2,7 @@
 // จำลอง Omada Open API (OAuth2 client credentials) เฉพาะ endpoint ที่ services/omada.js เรียกจริง:
 //   POST /openapi/authorize/token?grant_type=client_credentials
 //   GET  /openapi/v1/:omadacId/sites/:siteId/devices|clients|alerts
+//   GET  /openapi/v1/:omadacId/sites/:siteId/dashboard/overview-diagram|traffic-activities
 //   GET  /openapi/v1/:omadacId/sites/:siteId/switches/:mac/ports
 //   GET  /openapi/v1/:omadacId/sites
 // Auth header ของบอท: "Authorization: AccessToken=<token>"; token ไม่ถูกต้อง → HTTP 200 + errorCode ตามรูปแบบของ Omada
@@ -68,11 +69,53 @@ module.exports = function omadaRoutes(holder, cfg) {
           name: `client-${d.name}-${i}`, hostName: `client-${d.name}-${i}`, ip: `10.${d.kind === 'ap' ? 10 : 20}.${clients.length % 250}.${(i % 250) + 1}`,
           mac: `02-00-${(clients.length >> 8).toString(16).padStart(2, '0')}-${(clients.length & 255).toString(16).padStart(2, '0')}-00-${i.toString(16).padStart(2, '0')}`.toUpperCase(),
           ssid: wireless ? 'Office-WiFi' : null, apName: wireless ? d.name : null,
-          signalLevel: wireless ? -45 - ((i * 7) % 30) : null, trafficDown: 1_000_000 * i, trafficUp: 200_000 * i, wireless,
+          signalLevel: wireless ? -45 - ((i * 7) % 30) : null,
+          // ค่าสะสมตั้งแต่เชื่อมต่อ — โตตามเวลาที่ mock รัน (ชื่อ field trafficDown/trafficUp ยังไม่ยืนยันกับ controller จริง)
+          trafficDown: 1_000_000 * i + (now - s.loadedAt) * 20_000 * i, trafficUp: 200_000 * i + (now - s.loadedAt) * 4_000 * i,
+          wireless, band: wireless ? (i % 2 ? '5G' : '2.4G') : null,
         });
       }
     }
-    reply(res, page(clients, req.query));
+    // clientStat ใน result: รูปแบบเดียวกับที่ยืนยันกับ controller จริง (นับจากทุก client ไม่ใช่เฉพาะหน้านี้)
+    const wirelessN = clients.filter((c) => c.wireless).length;
+    const clientStat = {
+      total: clients.length, wireless: wirelessN, wired: clients.length - wirelessN, numOffline: 0,
+      num2g: clients.filter((c) => c.band === '2.4G').length, num5g: clients.filter((c) => c.band === '5G').length, num6g: 0,
+      numUser: clients.length, numGuest: 0,
+    };
+    reply(res, { ...page(clients.map(({ band, ...c }) => c), req.query), clientStat });
+  });
+
+  // ── dashboard: 2 endpoint ที่ยืนยันกับ controller จริงแล้วว่าตอบ errorCode 0 ──
+  router.get('/openapi/v1/:omadacId/sites/:siteId/dashboard/overview-diagram', (req, res) => {
+    holder.log('omada', 'dashboard/overview-diagram');
+    const s = holder.state; const now = Math.floor(Date.now() / 1000);
+    const dev = s.inOmada(); const upOf = (k) => dev.filter((d) => d.kind === k && s.viewStatus(d, 'omada', now) === 'up').length;
+    const count = (k) => dev.filter((d) => d.kind === k).length;
+    const clientsOf = (pred) => dev.filter((d) => pred(d) && s.viewStatus(d, 'omada', now) === 'up').reduce((a, d) => a + (d.clients || 0), 0);
+    reply(res, {
+      totalGatewayNum: count('gateway'), connectedGatewayNum: upOf('gateway'), disconnectedGatewayNum: count('gateway') - upOf('gateway'),
+      totalSwitchNum: count('switch'), connectedSwitchNum: upOf('switch'), disconnectedSwitchNum: count('switch') - upOf('switch'),
+      totalPorts: count('switch') * 24, availablePorts: count('switch') * 20, powerConsumption: count('switch') * 38,
+      totalApNum: count('ap'), connectedApNum: upOf('ap'), isolatedApNum: 0, disconnectedApNum: count('ap') - upOf('ap'),
+      totalClientNum: clientsOf(() => true), wiredClientNum: clientsOf((d) => d.kind !== 'ap'), wirelessClientNum: clientsOf((d) => d.kind === 'ap'), guestNum: 0,
+    });
+  });
+
+  // start/end = Unix วินาที (ยืนยันกับ controller จริง) → bucket ละ 5 นาที; bucket ที่ไม่มี traffic ส่งแค่ { time } (เหมือนของจริง)
+  // ชื่อ field tx/rx ในที่นี้เป็นการสมมติ — controller จริงที่ใช้ probe ไม่มี traffic เลยจึงยืนยันไม่ได้
+  router.get('/openapi/v1/:omadacId/sites/:siteId/dashboard/traffic-activities', (req, res) => {
+    holder.log('omada', 'dashboard/traffic-activities');
+    const s = holder.state; const now = Math.floor(Date.now() / 1000);
+    const end = parseInt(req.query.end, 10); const start = parseInt(req.query.start, 10);
+    if (!(start > 0) || !(end > start)) return res.status(400).json({});
+    const STEP = 300;
+    const clientsOfKind = (k) => s.inOmada().filter((d) => d.kind === k && s.viewStatus(d, 'omada', now) === 'up').reduce((a, d) => a + (d.clients || 0), 0);
+    const apClients = clientsOfKind('ap'); const swClients = clientsOfKind('switch');
+    const bucket = (t, n) => (n > 0 ? { time: t, tx: n * 40_000 * (1 + (t / STEP) % 3), rx: n * 150_000 * (1 + (t / STEP) % 4) } : { time: t });
+    const ap = []; const sw = [];
+    for (let t = Math.ceil(start / STEP) * STEP; t <= end && ap.length < 600; t += STEP) { ap.push(bucket(t, apClients)); sw.push(bucket(t, swClients)); }
+    reply(res, { apTrafficActivities: ap, switchTrafficActivities: sw });
   });
 
   router.get('/openapi/v1/:omadacId/sites/:siteId/alerts', (req, res) => {

@@ -70,13 +70,44 @@ module.exports = function hikRoutes(holder, cfg) {
     ok(res, paged(regionsOf(holder.state), req.body || {}));
   });
 
+  // รหัสชนิด event ของ mock (ของจริงยังไม่ยืนยันรหัส — ผู้ใช้ตั้ง HIKCENTRAL_EVENT_TYPES เอง; mock ใช้ชุดนี้)
+  const MOCK_EVENT_TYPES = { 131329: 'Camera offline', 131330: 'Motion detection', 131331: 'Video loss', 131332: 'Video tampering' };
+  const hash = (str) => { let h = 2166136261; for (const ch of str) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0; return h; };
+
+  // ของจริง: ต้องมี startTime (ISO8601 มี offset) และ eventTypes (array ไม่ว่าง) ไม่งั้น code=2 "parameter error"
+  // เรียกแบบเก่า (ไม่มีทั้งคู่) ยังตอบ event "Camera offline" ล่าสุดเหมือนเดิมเพื่อไม่ให้ test เดิมพัง
   router.post('/artemis/api/eventService/v1/eventRecords/page', (req, res) => {
     holder.log('hikcentral', 'eventRecords');
     const s = holder.state; const now = Math.floor(Date.now() / 1000);
+    const body = req.body || {};
+    const strict = body.startTime !== undefined || body.eventTypes !== undefined;
+    if (strict) {
+      const bad = (what) => res.json({ code: '2', msg: `Incorrect request parameter. [${what} parameter error]` });
+      const st = Date.parse(body.startTime); const et = body.endTime === undefined ? now * 1000 : Date.parse(body.endTime);
+      if (typeof body.startTime !== 'string' || Number.isNaN(st)) return bad('startTime');
+      if (Number.isNaN(et) || et < st) return bad('endTime');
+      if (!Array.isArray(body.eventTypes) || !body.eventTypes.length || !body.eventTypes.every((t) => MOCK_EVENT_TYPES[t])) return bad('eventTypes');
+      const wanted = new Set(body.eventTypes.map(Number));
+      const events = [];
+      const cams = s.inHik().filter((c) => s.viewStatus(c, 'hikcentral', now) === 'up');
+      // 1 นาทีต่อ slot: motion บ่อย, video loss/tamper นานๆ ครั้ง — คงที่ตามชื่อกล้อง+slot (ซ้ำได้ ไม่สุ่ม)
+      for (let t = Math.ceil(st / 60000) * 60000; t <= et && events.length < 5000; t += 60000) {
+        for (const c of cams) {
+          const h = hash(`${c.name}:${t / 60000}`);
+          let type = null;
+          if (h % 23 === 0) type = 131330;
+          else if (h % 97 === 0) type = 131331;
+          else if (h % 149 === 0) type = 131332;
+          if (type && wanted.has(type)) events.push({ eventName: MOCK_EVENT_TYPES[type], eventType: type, srcIndex: c.name, srcName: c.name, happenTime: new Date(t).toISOString() });
+        }
+      }
+      events.sort((x, y) => (x.happenTime < y.happenTime ? 1 : -1));
+      return ok(res, paged(events, body));
+    }
     const events = s.inHik().filter((c) => s.viewStatus(c, 'hikcentral', now) === 'down')
       .map((c) => ({ eventName: 'Camera offline', eventType: 131329, srcIndex: c.name, srcName: c.name, happenTime: new Date(s.downSince(c, now) * 1000).toISOString() }))
-      .sort((a, b) => (a.happenTime < b.happenTime ? 1 : -1));
-    ok(res, paged(events, req.body || {}));
+      .sort((x, y) => (x.happenTime < y.happenTime ? 1 : -1));
+    ok(res, paged(events, body));
   });
 
   return router;

@@ -90,4 +90,4 @@ async function buildStats({ monitorKeys = [], zabbix = null, omada = null, hikce
   return stats;
 }
 
-module.exports = { buildStats };
+module.exports = { buildStats, withTimeout };
