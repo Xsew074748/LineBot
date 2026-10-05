@@ -19,6 +19,7 @@ COPY middleware/   ./middleware/
 COPY mock-server/  ./mock-server/
 COPY public/       ./public/
 COPY routes/       ./routes/
+COPY scripts/      ./scripts/
 COPY services/     ./services/
 COPY config.js     ./
 COPY index.js      ./

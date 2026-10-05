@@ -26,7 +26,7 @@ const logText = (logger) => ['info', 'warn', 'error'].flatMap((k) => logger[k].m
 describe('loadConfig()', () => {
   it('ค่าเริ่มต้นปลอดภัย: ปิด, DRYRUN, types=192517, ไม่มีกล้อง, 60 วินาที, cooldown 10, severity 3', () => {
     expect(loadConfig({})).toMatchObject({
-      enabled: false, active: false, dryRun: true, types: [192517], cameras: [], intervalSec: 60, cooldownMin: 10, severity: 3, warnings: [],
+      enabled: false, active: false, dryRun: true, types: [192517], cameras: [], intervalSec: 60, lookbackMin: 30, cooldownMin: 10, severity: 3, warnings: [],
     });
   });
   it('เปิดแล้วต้องมีกล้อง: ENABLED=true แต่ไม่มี CAMERAS → ไม่ทำงาน + เตือน', () => {
@@ -61,6 +61,11 @@ describe('loadConfig()', () => {
     expect(c.warnings.join(' ')).toMatch(/CAMERAS/);
     const many = Array.from({ length: 80 }, (_, i) => `c${i}`).join(',');
     expect(cfgOf({ [`${P}CAMERAS`]: many }).cameras).toHaveLength(50);
+  });
+  it('LOOKBACK_MIN ปรับได้ (1–1440, ค่าเริ่มต้น 30); นอกช่วง/ไม่ใช่จำนวนเต็ม → 30', () => {
+    expect(cfgOf({ [`${P}LOOKBACK_MIN`]: '10' }).lookbackMin).toBe(10);
+    expect(cfgOf({ [`${P}LOOKBACK_MIN`]: '1440' }).lookbackMin).toBe(1440);
+    for (const bad of ['0', '-5', '1441', 'abc', '1.5', '', ' ']) expect(cfgOf({ [`${P}LOOKBACK_MIN`]: bad }).lookbackMin).toBe(30);
   });
   it('ตัวเลขนอกช่วง/ไม่ใช่ตัวเลข → ใช้ค่าเริ่มต้น (ไม่ crash ไม่เป็น 0/NaN)', () => {
     const c = cfgOf({ [`${P}INTERVAL_SEC`]: '5', [`${P}COOLDOWN_MIN`]: '-1', [`${P}SEVERITY`]: '9' });
@@ -154,6 +159,13 @@ describe('queryWindow()', () => {
   it('ย้อนจาก watermark 30 นาที (เหลื่อมเวลา)', () => {
     const s = { ...freshState(NOW - 5 * 3600_000), watermarkMs: NOW - 10 * MIN };
     expect(queryWindow(s, NOW)).toEqual({ startMs: NOW - 10 * MIN - OVERLAP_MS, endMs: NOW });
+  });
+  it('lookback ปรับได้: ใช้ค่าที่ส่งเข้ามาแทน 30 นาที (แต่ยังไม่ก่อน sinceMs/ไม่เกิน 24 ชม.)', () => {
+    const s = { ...freshState(NOW - 5 * 24 * 3600_000), watermarkMs: NOW - 10 * MIN };
+    expect(queryWindow(s, NOW, 5 * MIN).startMs).toBe(NOW - 15 * MIN);
+    expect(queryWindow(s, NOW, 90 * MIN).startMs).toBe(NOW - 100 * MIN);
+    expect(queryWindow(s, NOW, 5000 * MIN).startMs).toBe(NOW - MAX_WINDOW_MS);
+    expect(queryWindow({ ...s, sinceMs: NOW - 20 * MIN }, NOW, 90 * MIN).startMs).toBe(NOW - 20 * MIN); // ไม่ก่อน sinceMs
   });
   it('ไม่เกิน 24 ชม. แม้ watermark เก่ามาก (เช่น บอทหยุดไปหลายวัน)', () => {
     const s = { ...freshState(NOW - 10 * 24 * 3600_000), watermarkMs: NOW - 5 * 24 * 3600_000 };
@@ -367,6 +379,15 @@ describe('createChecker()', () => {
     await checker.check();
     expect(hik.getTempAlarmEvents).toHaveBeenCalledWith({ startMs: NOW - 5 * MIN, endMs: NOW, eventTypes: [192517], srcIndexs: '1086,1087,1088,1089' });
   });
+  it('LOOKBACK_MIN จาก env มีผลกับช่วงค้นจริง', async () => {
+    const st = { ...freshState(NOW - 5 * 3600_000), watermarkMs: NOW - 60 * MIN };
+    const a = build({ store: memStore(st), env: { [`${P}LOOKBACK_MIN`]: '5' } });
+    await a.checker.check();
+    expect(a.hik.getTempAlarmEvents.mock.calls[0][0].startMs).toBe(NOW - 65 * MIN);
+    const b = build({ store: memStore(st) }); // ค่าเริ่มต้น 30
+    await b.checker.check();
+    expect(b.hik.getTempAlarmEvents.mock.calls[0][0].startMs).toBe(NOW - 90 * MIN);
+  });
   it('log ไม่มี URL รูป/ข้อความ error ที่เป็นความลับ: error ดิบถูกตัดเหลือ code/ข้อความสั้น', async () => {
     const { checker, logger } = build({ hikOver: { getTempAlarmEvents: jest.fn(async () => { throw Object.assign(new Error('x'.repeat(500)), { code: 'ECONNREFUSED' }); }) } });
     await checker.check();
@@ -439,5 +460,74 @@ describe('HikCentral service + mock-lab (record รูปแบบจริง�
     expect(sent[0].text).not.toMatch(/mock\.invalid|https?:/);
     expect(cams.some((c) => sent[0].text.includes(c.name))).toBe(true);
     expect((await checker.check()).actions).toEqual([]); // รอบสองไม่ซ้ำ
+  });
+});
+
+// ── Artemis สะท้อน AppKey/AppSecret/StringToSign กลับมาใน msg ของ error — ต้องไม่หลุดลง error/log ──────────────
+describe('error จริงจาก Artemis ที่สะท้อน credential (stub HTTP server)', () => {
+  const http = require('http');
+  const KEY = 'FULLKEY-8f3a91c2d7';
+  const SEC = 'FULLSECRET-zq7w2e5r9t';
+  const ECHO = `api AK/SK signature authentication failed,Invalid Signature! and StringToSign: POST\n*/*\napplication/json\nx-ca-key:${KEY}\nx-ca-timestamp:1791176678431\n/artemis/api/eventService/v1/eventRecords/page, apiName : Search for events, appKey : ${KEY}, secret : ${SEC}`;
+  let server; let hikReal; let mode = 'code';
+
+  beforeAll(async () => {
+    server = http.createServer((req, res) => {
+      req.resume();
+      req.on('end', () => {
+        if (mode === 'http401') { res.writeHead(401, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ msg: ECHO })); return; }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ code: '0x02401003', msg: ECHO }));
+      });
+    });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    Object.assign(process.env, { HIKCENTRAL_URL: `http://127.0.0.1:${server.address().port}`, HIKCENTRAL_APP_KEY: KEY, HIKCENTRAL_APP_SECRET: SEC, HIKCENTRAL_TIMEOUT_MS: '3000' });
+    jest.resetModules();
+    hikReal = require('../services/hikcentral');
+  });
+  afterAll(() => new Promise((r) => server.close(r)));
+
+  const SECRETS = [KEY, SEC, 'x-ca-key', 'StringToSign: POST', 'x-ca-timestamp'];
+  const leaks = (text) => SECRETS.filter((s) => String(text).includes(s));
+  const allText = (err) => [err.message, err.stack, String(err), JSON.stringify(err, Object.getOwnPropertyNames(err))].join('\n');
+  const fetchOpts = { startMs: NOW - 60 * MIN, endMs: NOW, eventTypes: [192517], srcIndexs: '1088' };
+
+  it('error ที่โยนออกจาก getTempAlarmEvents (message/stack/ทุก property) ไม่มี AppKey/AppSecret/StringToSign แต่ยังบอกรหัสและสาเหตุสั้นๆ', async () => {
+    mode = 'code';
+    const err = await hikReal.getTempAlarmEvents(fetchOpts).catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(leaks(allText(err))).toEqual([]);
+    expect(err.message).toMatch(/0x02401003/);
+    expect(err.message).toMatch(/Invalid Signature/);
+    expect(err.message).toContain('StringToSign:(ตัด)'); // ส่วนลายเซ็นถูกตัดทิ้ง
+    expect(err.message.length).toBeLessThanOrEqual(160);
+  });
+  it('HTTP 4xx ที่ body สะท้อน key: error คง status แต่ไม่พก body ติดมา', async () => {
+    mode = 'http401';
+    const err = await hikReal.getTempAlarmEvents(fetchOpts).catch((e) => e);
+    expect(err.status).toBe(401);
+    expect(leaks(allText(err))).toEqual([]);
+  });
+  it('บรรทัดที่ checker เขียนลง log (และ console ทั้งหมดระหว่างรัน) ไม่มี key/secret เต็ม', async () => {
+    mode = 'code';
+    const spies = ['log', 'info', 'warn', 'error'].map((k) => jest.spyOn(console, k).mockImplementation(() => {}));
+    const logger = silent();
+    const store = { doc: freshState(NOW - 3600_000), load() { return this.doc; }, save(d) { this.doc = d; return true; } };
+    const checker = createChecker({ hikcentral: hikReal, pusher: jest.fn(), logger, env: baseEnv({ [`${P}DRYRUN`]: 'false' }), now: () => NOW, store });
+    const r1 = await checker.check();
+    const r2 = await checker.check();
+    const consoleText = spies.flatMap((s) => s.mock.calls.map((c) => c.join(' '))).join('\n');
+    spies.forEach((s) => s.mockRestore());
+    expect(r1.status).toBe('fetch-failed');
+    expect(r2.status).toBe('fetch-failed');
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(leaks(logText(logger))).toEqual([]);
+    expect(leaks(consoleText)).toEqual([]);
+    expect(logText(logger)).toMatch(/0x02401003/); // ยังเห็นสาเหตุ (รหัส) ใน log
+  });
+  it('redactSecrets: ตัด AppKey/AppSecret/StringToSign ทุกตำแหน่ง ไม่ปล่อย msg ดิบ', () => {
+    const out = hikReal.redactSecrets(ECHO);
+    expect(leaks(out)).toEqual([]);
+    expect(out).toMatch(/StringToSign:\(ตัด\)/);
   });
 });

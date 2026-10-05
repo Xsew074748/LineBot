@@ -13,6 +13,7 @@
 //   TYPES=192517        รหัส eventType (จำนวนเต็มคั่น ",")
 //   CAMERAS=1086,1087,1088,1089   camera index code ที่เฝ้า (ต้องระบุ — ไม่ระบุ = ไม่ทำงาน ไม่เดาจากชื่อ)
 //   INTERVAL_SEC=60     ตรวจทุกกี่วินาที (30–3600)
+//   LOOKBACK_MIN=30     ค้นย้อนจาก watermark กี่นาทีเผื่อ HikCentral บันทึกเหตุการณ์ช้า (1–1440; ช่วงค้นรวมไม่เกิน 24 ชม.)
 //   COOLDOWN_MIN=10     กล้องตัวเดียวกันเกิดซ้ำภายในกี่นาที (นับจากเวลาเกิดเหตุ) ไม่แจ้งซ้ำ แต่นับรวมในข้อความ (0 = ไม่ใช้)
 //   SEVERITY=3          ระดับที่ส่งเข้า pushToUsers (3 = เฉพาะ ADMIN/IT_STAFF; ≥4 ถึง VIEWER ด้วย)
 //
@@ -25,7 +26,8 @@ const path = require('path');
 const { withTimeout } = require('./stats');
 
 const DEFAULT_TYPES = [192517];
-const OVERLAP_MS = 30 * 60_000;          // ค้นย้อนจาก watermark เผื่อ HikCentral บันทึกช้า
+const DEFAULT_LOOKBACK_MIN = 30;
+const OVERLAP_MS = DEFAULT_LOOKBACK_MIN * 60_000; // ค่าเริ่มต้นของการค้นย้อนจาก watermark เผื่อ HikCentral บันทึกช้า (ปรับด้วย LOOKBACK_MIN)
 const MAX_WINDOW_MS = 24 * 3600_000;     // ช่วงค้นไม่เกิน 24 ชม. (เพดานของ API คือ 31 วัน)
 const SEEN_MAX = 200;
 const MAX_SHOWN = 5;
@@ -49,7 +51,7 @@ function splitList(raw) {
   return String(raw ?? '').split(',').map((s) => s.trim()).filter(Boolean);
 }
 
-// คืน { enabled, active, dryRun, types[], cameras[], intervalSec, cooldownMin, severity, warnings[] }
+// คืน { enabled, active, dryRun, types[], cameras[], intervalSec, lookbackMin, cooldownMin, severity, warnings[] }
 // active = enabled และมีกล้องที่ถูกต้องอย่างน้อย 1 ตัว (ไม่มี = ไม่ทำงาน)
 function loadConfig(env = process.env) {
   const warnings = [];
@@ -89,6 +91,7 @@ function loadConfig(env = process.env) {
     types,
     cameras,
     intervalSec: intInRange(env[`${P}INTERVAL_SEC`], 60, 30, 3600),
+    lookbackMin: intInRange(env[`${P}LOOKBACK_MIN`], DEFAULT_LOOKBACK_MIN, 1, 1440),
     cooldownMin: intInRange(env[`${P}COOLDOWN_MIN`], 10, 0, 1440),
     severity: intInRange(env[`${P}SEVERITY`], 3, 0, 5),
     warnings,
@@ -136,8 +139,8 @@ function fileStore(file = DEFAULT_STATE_FILE, logger = null) {
 }
 
 // ช่วงเวลาที่ต้องค้นรอบนี้ — ไม่ก่อน sinceMs (ไม่ย้อนส่ง), ย้อนจาก watermark เผื่อบันทึกช้า, และไม่เกิน 24 ชม.
-function queryWindow(state, nowMs) {
-  return { startMs: Math.max(state.sinceMs, state.watermarkMs - OVERLAP_MS, nowMs - MAX_WINDOW_MS), endMs: nowMs };
+function queryWindow(state, nowMs, lookbackMs = OVERLAP_MS) {
+  return { startMs: Math.max(state.sinceMs, state.watermarkMs - lookbackMs, nowMs - MAX_WINDOW_MS), endMs: nowMs };
 }
 
 // ── evaluate (บริสุทธิ์: ไม่มี I/O ไม่แก้ state เดิม) ──────────────────────────────
@@ -249,7 +252,7 @@ function createChecker({ hikcentral, pusher, logger = console, env = process.env
     }
 
     const nowMs = now();
-    const { startMs, endMs } = queryWindow(state, nowMs);
+    const { startMs, endMs } = queryWindow(state, nowMs, cfg.lookbackMin * 60_000);
     let result;
     try {
       result = await withTimeout(hikcentral.getTempAlarmEvents({ startMs, endMs, eventTypes: cfg.types, srcIndexs: cfg.cameras.join(',') }), FETCH_TIMEOUT_MS);
@@ -302,7 +305,7 @@ function createChecker({ hikcentral, pusher, logger = console, env = process.env
     if (!cfg.active) return () => {};
     // ไม่มี state ที่ใช้ได้ → บันทึกเวลาเริ่มทำงานทันที (ไม่ใช่ตอนรอบแรก) กันเหตุการณ์ที่เกิดระหว่างรอ delay ถูกข้าม และกัน restart ซ้อนรีเซ็ตเส้น since
     if (!cfg.dryRun && !loaded) st.save(state);
-    logger.info(`hik-temp-alarm: เปิดใช้ (กล้อง ${cfg.cameras.length} ตัว, types=${cfg.types.join(',')}, ทุก ${cfg.intervalSec}s, cooldown=${cfg.cooldownMin}m, severity=${cfg.severity}${cfg.dryRun ? ', DRYRUN' : ''})`);
+    logger.info(`hik-temp-alarm: เปิดใช้ (กล้อง ${cfg.cameras.length} ตัว, types=${cfg.types.join(',')}, ทุก ${cfg.intervalSec}s, lookback=${cfg.lookbackMin}m, cooldown=${cfg.cooldownMin}m, severity=${cfg.severity}${cfg.dryRun ? ', DRYRUN' : ''})`);
     startTimer = setTimeout(safeCheck, START_DELAY_MS);
     timer = setInterval(safeCheck, cfg.intervalSec * 1000);
     if (startTimer.unref) startTimer.unref();

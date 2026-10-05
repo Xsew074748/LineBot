@@ -58,11 +58,11 @@
   (131329-131331 เป็นรหัสที่ระบบรู้จักแต่ไม่มีเหตุการณ์; ค่า 131329-131332 ใน mock-lab เป็นของสมมติ)
 - ⚠️ Artemis **สะท้อน AppKey กลับมาใน msg ของ error ลายเซ็น** (0x02401003) — hikcentral.getTempAlarmEvents ผ่าน redactSecrets (ตัด AppKey/AppSecret/StringToSign) ก่อน error ถึง log; ห้าม log msg ดิบของ Artemis
 - การทำงาน: ลูปทุก INTERVAL_SEC (60) เรียก hikcentral.getTempAlarmEvents (ผ่าน circuit breaker เดิม; ไม่ดึงรูป) → evaluate() บริสุทธิ์ → ส่งผ่าน pushToUsers (allow-list ตาม role, severity 3 = ADMIN/IT_STAFF)
-  - ไม่ย้อนส่ง: state.sinceMs = เวลาเริ่มทำงาน (หรือที่บันทึกไว้) — เหตุการณ์ก่อนหน้านั้นไม่แจ้งเลย; ค้นย้อนจาก watermark 30 นาที แล้วกรองซ้ำด้วย eventIndexCode (seen ≤ 200); ช่วงค้น ≤ 24 ชม.
+  - ไม่ย้อนส่ง: state.sinceMs = เวลาเริ่มทำงาน (หรือที่บันทึกไว้) — เหตุการณ์ก่อนหน้านั้นไม่แจ้งเลย; ค้นย้อนจาก watermark 30 นาที (LOOKBACK_MIN ปรับได้) แล้วกรองซ้ำด้วย eventIndexCode (seen ≤ 200); ช่วงค้น ≤ 24 ชม.
   - รวมเหตุการณ์ในรอบเดียวเป็นข้อความเดียว (แสดง ≤ 5 + "และอีก N") และ cooldown ต่อกล้อง (COOLDOWN_MIN, นับจากเวลาเกิดเหตุ)
   - ดึงไม่ได้/breaker เปิด → ข้ามรอบ ไม่เปลี่ยน state; ส่ง LINE ไม่ถึงใครเลย → ไม่บันทึก state (รอบหน้าลองใหม่); ไม่มีผู้รับเข้าเกณฑ์เลย → บันทึก (ไม่วนส่งไม่รู้จบ)
   - state: data/hik-temp-alarm.json (atomic; พัง/ไม่มี → เริ่มใหม่นับจากตอนนี้); **DRYRUN ไม่ส่ง ไม่เขียน state** แต่ log "จะส่ง …"
-- config (.env, ดู .env.example): HIKCENTRAL_TEMP_ALARM_ENABLED (false), _DRYRUN (true — ส่งจริงเมื่อตั้ง "false" ชัดเจนเท่านั้น), _TYPES (192517), _CAMERAS (ต้องระบุ เช่น 1086,1087,1088,1089), _INTERVAL_SEC, _COOLDOWN_MIN, _SEVERITY
+- config (.env, ดู .env.example): HIKCENTRAL_TEMP_ALARM_ENABLED (false), _DRYRUN (true — ส่งจริงเมื่อตั้ง "false" ชัดเจนเท่านั้น), _TYPES (192517), _CAMERAS (ต้องระบุ เช่น 1086,1087,1088,1089), _INTERVAL_SEC, _LOOKBACK_MIN (30), _COOLDOWN_MIN, _SEVERITY
   — ค่าผิดรูปแบบ → ใช้ค่าเริ่มต้น + warning ใน log; ENABLED แต่ไม่มี CAMERAS → ไม่ทำงาน
 - ดูข้อความที่จะส่งโดยไม่ต่อเครือข่าย: `node scripts/hik-temp-alarm-replay.js [--burst]` (เล่นซ้ำเหตุการณ์จริง 17 ก.ย. ผ่าน evaluate/renderMessage เดียวกับที่ใช้จริง)
 - ยังไม่ทราบ: ความหน่วงที่ HikCentral บันทึกเหตุการณ์ (จึงค้นเหลื่อมเวลา), ทำไมมีเหตุการณ์เฉพาะกล้อง 1088, ชนิดอื่น (เช่น Fire Source) — สแกนรหัส 1-200000 ใน 90 วันไม่พบชนิดอื่น
