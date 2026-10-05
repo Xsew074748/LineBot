@@ -20,6 +20,7 @@ const statsDetail  = require('./services/stats-detail');
 const pushTargets  = require('./services/push-targets');
 const cameraIdentity = require('./services/camera-identity');
 const omadaTrafficAlert = require('./services/omada-traffic-alert');
+const hikTempAlarm = require('./services/hik-temp-alarm');
 const dailySummary = require('./services/daily-summary');
 
 const setupAuth   = require('./middleware/setupAuth');
@@ -1575,4 +1576,7 @@ app.listen(PORT, () => {
 
   // แจ้งเตือน traffic ของ AP เกิน threshold (ปิดอยู่ถ้าไม่ตั้ง OMADA_TRAFFIC_ALERT_*_MBPS) — ส่งผ่าน pushToUsers (allow-list เดิม)
   if (omada) omadaTrafficAlert.createChecker({ omada, pusher: pushToUsers, logger }).start();
+
+  // แจ้งเตือน Temperature Alarm จาก HikCentral (กล้องความร้อน) — ปิดอยู่ถ้าไม่ตั้ง HIKCENTRAL_TEMP_ALARM_ENABLED=true และเริ่มที่ DRYRUN (ไม่ส่งจริง)
+  if (hikcentral) hikTempAlarm.createChecker({ hikcentral, pusher: pushToUsers, logger }).start();
 });

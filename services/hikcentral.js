@@ -309,6 +309,71 @@ async function getEventRecords({ startMs, endMs, eventTypes }) {
   };
 }
 
+// ── เหตุการณ์สำหรับแจ้งเตือน (services/hik-temp-alarm.js) ──────────────────────
+// รูปแบบ request เหมือน getEventRecords ที่ยืนยันกับของจริงแล้ว (eventTypes/srcIndexs เป็นสตริงคั่น ",", เวลา ISO8601 มี offset)
+// ✔ ยืนยันของจริง: ช่วงเวลา ≤ 31 วัน (เกิน → code 2) — ผู้เรียกจำกัดไว้ ≤ 24 ชม.
+// ✔ ยืนยันของจริง: record มี eventIndexCode, eventType (สตริง), srcType, srcIndex, description (ว่าง), startTime, stopTime,
+//   eventPicUri, eventPicList, linkCameraIndexCode — ไม่มีตัวเลขอุณหภูมิ
+// ไม่คืน eventPicUri/eventPicList (ไม่ดึงรูป ไม่ให้ URL รูปหลุดเข้า log) และ sanitize ข้อความ error:
+// Artemis สะท้อน AppKey กลับมาใน msg ของ error ลายเซ็น จึงต้องตัดก่อนเข้า log
+const TEMP_EVENT_PAGE_SIZE = 100;
+const TEMP_EVENT_MAX_PAGES = 5;
+
+function redactSecrets(text) {
+  let out = String(text ?? '');
+  if (APP_KEY) out = out.split(APP_KEY).join(`****${APP_KEY.slice(-4)}`);
+  if (APP_SECRET) out = out.split(APP_SECRET).join('****');
+  return out.replace(/StringToSign:[\s\S]*?(?=, apiName|$)/g, 'StringToSign:(ตัด)');
+}
+
+// error ที่ผ่านการ redact แล้ว — คง name (เช่น CircuitOpenError), code และ HTTP status ไว้ให้ผู้เรียกแยกประเภทได้
+function sanitizeHikError(err) {
+  const e = new Error(redactSecrets(err && err.message).slice(0, 160));
+  e.name = (err && err.name) || 'Error';
+  if (err && err.code !== undefined) e.code = err.code;
+  const status = err && err.response && err.response.status;
+  if (status !== undefined) e.status = status;
+  return e;
+}
+
+// record ดิบของ artemis → { id, type, cameraId, startMs, stopMs } (null ถ้าไม่ครบ/เวลาอ่านไม่ได้)
+function normalizeEventRecord(rec) {
+  if (!rec || typeof rec !== 'object') return null;
+  const id = rec.eventIndexCode ? String(rec.eventIndexCode) : '';
+  const cameraId = rec.srcIndex || rec.linkCameraIndexCode;
+  const startMs = Date.parse(rec.startTime);
+  const type = Number(rec.eventType);
+  if (!id || !cameraId || !Number.isFinite(startMs) || !Number.isFinite(type)) return null;
+  const stopMs = Date.parse(rec.stopTime);
+  return { id, type, cameraId: String(cameraId), startMs, stopMs: Number.isFinite(stopMs) ? stopMs : null };
+}
+
+// eventTypes: array ของรหัส (จำนวนเต็ม), srcIndexs: สตริง camera index code คั่นด้วย ","
+async function getTempAlarmEvents({ startMs, endMs, eventTypes, srcIndexs }) {
+  const events = [];
+  let truncated = false;
+  try {
+    for (let page = 1; page <= TEMP_EVENT_MAX_PAGES; page++) {
+      const data = await hikPost('/artemis/api/eventService/v1/eventRecords/page', {
+        pageNo: page, pageSize: TEMP_EVENT_PAGE_SIZE,
+        startTime: isoWithOffset(startMs), endTime: isoWithOffset(endMs),
+        eventTypes: eventTypes.join(','), srcType: 'camera', srcIndexs,
+      });
+      const list = data?.list || [];
+      for (const rec of list) {
+        const ev = normalizeEventRecord(rec);
+        if (ev) events.push(ev);
+      }
+      const total = Number(data?.total ?? 0);
+      if (list.length < TEMP_EVENT_PAGE_SIZE || (total && page * TEMP_EVENT_PAGE_SIZE >= total)) break;
+      if (page === TEMP_EVENT_MAX_PAGES) truncated = true;
+    }
+  } catch (err) {
+    throw sanitizeHikError(err);
+  }
+  return { events, truncated };
+}
+
 // ── สถานะ online — artemis ใช้ status: 1 = online, 0 = offline ────────────────
 function isOnline(cam) {
   if (!cam) return false;
@@ -358,5 +423,8 @@ module.exports = {
   getRegions,
   getEvents,
   getEventRecords,
+  getTempAlarmEvents,
+  normalizeEventRecord,
+  redactSecrets,
   healthCheck,
 };

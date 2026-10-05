@@ -88,7 +88,7 @@ module.exports = function hikRoutes(holder, cfg) {
   });
 
   // รหัสชนิด event ของ mock (ของจริงยังไม่ยืนยันรหัส — ผู้ใช้ตั้ง HIKCENTRAL_EVENT_TYPES เอง; mock ใช้ชุดนี้)
-  const MOCK_EVENT_TYPES = { 131329: 'Camera offline', 131330: 'Motion detection', 131331: 'Video loss', 131332: 'Video tampering' };
+  const MOCK_EVENT_TYPES = { 131329: 'Camera offline', 131330: 'Motion detection', 131331: 'Video loss', 131332: 'Video tampering', 192517: 'Temperature alarm' };
   const hash = (str) => { let h = 2166136261; for (const ch of str) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0; return h; };
 
   // รูปแบบที่ "ยืนยันกับ HikCentral จริงแล้ว" (ผิด → code 2 "[<field> parameter error]" ตรวจเรียงตามนี้):
@@ -123,6 +123,13 @@ module.exports = function hikRoutes(holder, cfg) {
       for (let t = Math.ceil(st / 60000) * 60000; t <= et && events.length < 5000; t += 60000) {
         for (const c of cams) {
           const h = hash(`${c.name}:${t / 60000}`);
+          // 192517 = Temperature Alarm (ยืนยันกับของจริงแล้ว) — record "รูปแบบจริง" ของ HikCentral: eventIndexCode/startTime/stopTime/eventPicUri
+          // ไม่มี eventName/happenTime/ตัวเลขอุณหภูมิ และ description ว่าง (ใส่ eventPicUri/eventPicList ปลอมไว้ให้ test เช็คว่าบอทไม่เอาออกมา)
+          if (wanted.has(192517) && hash(`temp:${c.name}:${t / 60000}`) % 61 === 5) {
+            const iso = (ms) => new Date(ms + 7 * 3600e3).toISOString().replace(/\.\d+Z$/, '+07:00');
+            events.push({ eventIndexCode: `MOCK${hash(`id:${c.name}:${t}`).toString(16).toUpperCase()}`, eventType: '192517', srcType: 'camera', srcIndex: c.name, description: '',
+              startTime: iso(t), stopTime: iso(t + 15000), eventPicUri: `https://mock.invalid/pic/${c.name}/${t}.jpg`, eventPicList: [{ picUri: 'https://mock.invalid/pic/list.jpg' }], linkCameraIndexCode: c.name });
+          }
           let type = null;
           if (h % 23 === 0) type = 131330;
           else if (h % 97 === 0) type = 131331;
@@ -130,7 +137,8 @@ module.exports = function hikRoutes(holder, cfg) {
           if (type && wanted.has(type)) events.push({ eventName: MOCK_EVENT_TYPES[type], eventType: type, srcIndex: c.name, srcName: c.name, happenTime: new Date(t).toISOString() });
         }
       }
-      events.sort((x, y) => (x.happenTime < y.happenTime ? 1 : -1));
+      const tOf = (e) => e.happenTime || e.startTime;
+      events.sort((x, y) => (tOf(x) < tOf(y) ? 1 : -1));
       return ok(res, paged(events, body));
     }
     const events = s.inHik().filter((c) => s.viewStatus(c, 'hikcentral', now) === 'down')
