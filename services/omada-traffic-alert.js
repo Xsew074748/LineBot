@@ -212,6 +212,7 @@ function createChecker({ omada, pusher, logger = console, env = process.env, now
   const warned = new Set();
   const warnOnce = (key, msg) => { if (!warned.has(key)) { warned.add(key); logger.warn(msg); } };
   let timer = null; let startTimer = null; let running = false;
+  let lastTickAt = null; let lastResult = null; // ให้ /health/deep ดูว่า loop ยังเดินอยู่ (บันทึกเมื่อ "จบรอบ"; รอบที่ค้างไม่จบ = ไม่ tick)
 
   async function check() {
     if (!cfg.enabled) return { status: 'disabled' };
@@ -269,7 +270,7 @@ function createChecker({ omada, pusher, logger = console, env = process.env, now
   async function safeCheck() {
     if (running) return;
     running = true;
-    try { await check(); } catch (err) { logger.error(`omada-traffic-alert: ผิดพลาด: ${err.message}`); } finally { running = false; }
+    try { const r = await check(); lastResult = (r && r.status) || 'ok'; } catch (err) { lastResult = 'error'; logger.error(`omada-traffic-alert: ผิดพลาด: ${err.message}`); } finally { running = false; lastTickAt = now(); }
   }
 
   function start() {
@@ -288,7 +289,10 @@ function createChecker({ omada, pusher, logger = console, env = process.env, now
     startTimer = null; timer = null;
   }
 
-  return { check, start, stop, config: cfg, getState: () => state };
+  // สถานะ loop สำหรับ /health/deep — เฉพาะเวลา/สถานะ ไม่มีข้อมูล traffic
+  const getStatus = () => ({ enabled: cfg.enabled, intervalMs: cfg.intervalMin * 60_000, lastTickAt, lastResult });
+
+  return { check, start, stop, config: cfg, getState: () => state, getStatus };
 }
 
 module.exports = { loadConfig, extractBuckets, evaluate, createChecker, fileStore, alertText, recoveredText, emptyState, RECOVER_RATIO };

@@ -12,6 +12,8 @@ const logger    = require('./services/logger');
 const redact    = require('./services/redact');
 const crashGuard = require('./services/crash-guard');
 const opsAlert  = require('./services/ops-alert');
+const { createLineHealth } = require('./services/line-health');
+const healthDeep = require('./services/health-deep');
 
 // ── จัดการ process ล้ม (ลงทะเบียนก่อนโหลดโมดูลอื่น ให้ครอบถึงตอน startup) ─────────────
 // log รายละเอียดที่ redact แล้ว → (ถ้าเปิด OPS_CRASH_NOTIFY=true) แจ้ง ADMIN หนึ่งครั้งต่อ cooldown → exit(1) ให้ Docker restart ตามเดิม
@@ -59,10 +61,14 @@ const lineClient = new line.messagingApi.MessagingApiClient({
   channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
 });
 
-// ผู้รับ = ADMIN เท่านั้น; ใช้ lineClient.pushMessage ตามเดิม (ไม่ครอบ/แก้ตัวส่ง)
+// ตัวนับผลส่ง LINE push สำหรับ /health/deep (ไม่ส่งอะไรเอง) — นับที่ระดับ "การส่งหนึ่งครั้ง" หลัง retry (ดู services/line-health.js)
+// ไม่ครอบ lineClient.pushMessage ตรงๆ: push() เรียกนับตอนจบ retry; จุดส่งครั้งเดียวใช้ lineHealth.track(...)
+const lineHealth = createLineHealth({ logger });
+
+// ผู้รับ = ADMIN เท่านั้น (ops-alert กรอง role)
 adminNotifier = opsAlert.createAdminNotifier({
   listUsers: auth.listUsers,
-  send: (to, message) => lineClient.pushMessage({ to, messages: [message] }),
+  send: lineHealth.track((to, message) => lineClient.pushMessage({ to, messages: [message] })),
   logger,
 });
 
@@ -292,6 +298,25 @@ app.get('/health', (req, res) => {
     aiProvider: getActiveAiProviderName(),
   });
 });
+
+// ── /health/deep — "ทำงานได้จริงไหม" สำหรับ Zabbix ภายนอก (แยกจาก /health ที่ Docker HEALTHCHECK ใช้ — ไม่เปลี่ยน) ──
+// ปิดเป็นค่าเริ่มต้น (404) จนกว่าจะตั้ง HEALTH_DEEP_TOKEN (≥ 24 ตัวอักษร) ส่งผ่าน header x-health-token เท่านั้น
+// ใช้ lanOnly ไม่ได้ (โดเมน tunnel ถูก 403) จึงป้องกันด้วย token + rate limit; ไม่เรียก upstream ใดๆ; ตอบแค่อายุ/สถานะ/ตัวนับ
+const STARTED_AT = Date.now();
+const healthDeepCfg = healthDeep.loadConfig(process.env);
+healthDeepCfg.warnings.forEach((w) => logger.warn(`health-deep: ${w}`));
+logger.info(`health-deep: ${healthDeepCfg.enabled ? 'เปิดใช้ (ต้องมี header x-health-token)' : 'ปิด (ไม่ได้ตั้ง HEALTH_DEEP_TOKEN)'}`);
+let omadaChecker = null;   // ตั้งใน app.listen (ด้านล่าง) — ให้ /health/deep อ่าน getStatus()
+let hikChecker = null;
+app.get('/health/deep', rateLimit({ windowMs: 60_000, max: 30, standardHeaders: true }), healthDeep.createHandler({
+  cfg: healthDeepCfg,
+  getState: () => ({
+    startedAt: STARTED_AT,
+    checkers: { hikTempAlarm: hikChecker && hikChecker.getStatus(), omadaTrafficAlert: omadaChecker && omadaChecker.getStatus() },
+    line: lineHealth.snapshot(),
+    hikBreaker: hikcentral && typeof hikcentral.getBreakerState === 'function' ? hikcentral.getBreakerState().state : null,
+  }),
+}));
 
 // ── /stats endpoint (NetGuard Manager poll ทุก 5 นาที เก็บสถิติ) ─────────────
 // cache 60 วินาทีเมื่อข้อมูลครบทุก monitor — เหมือน /health ไม่ต้อง auth
@@ -1440,22 +1465,22 @@ async function push(userId, flexContents, extraQR = [], label = 'push') {
   const flexMsg = { type: 'flex', altText: ALT_TEXT, contents: flexContents };
   try {
     await lineClient.pushMessage({ to: userId, messages: [{ ...flexMsg, quickReply: fmt.quickReply(extraQR) }] });
-    return true;
+    lineHealth.recordSuccess(); return true;
   } catch (err) {
     logger.warn(`push: ล้มเหลวครั้งแรก [${label}] (${err.message}) — retrying without quickReply`);
     if (err.body) logger.warn(`push: LINE error body=${err.body}`);
     try {
       await lineClient.pushMessage({ to: userId, messages: [flexMsg] });
-      return true;
+      lineHealth.recordSuccess(); return true;
     } catch (err2) {
       logger.error(`push: ล้มเหลวทั้ง 2 ครั้ง [${label}] — ส่ง text fallback`, err2);
       if (err2.body) logger.error(`push: LINE error body=${err2.body}`);
       try {
         await lineClient.pushMessage({ to: userId, messages: [{ type: 'text', text: 'ขออภัย เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง' }] });
-        return true;
+        lineHealth.recordSuccess(); return true;
       } catch (err3) {
         logger.error(`push: text fallback ก็ล้มเหลว [${label}]`, err3);
-        return false;
+        lineHealth.recordFailure(err3); return false;
       }
     }
   }
@@ -1558,7 +1583,7 @@ async function handleZabbixPush(body) {
 // เลือกผู้รับแบบ allow-list ใน services/push-targets.js (PENDING/role แปลกๆ ไม่ได้รับ ทุก severity) — อย่าเขียน filter เองที่นี่
 const pushToUsers = pushTargets.createAlertPusher({
   listUsers: auth.listUsers,
-  send: (to, message) => lineClient.pushMessage({ to, messages: [message] }),
+  send: lineHealth.track((to, message) => lineClient.pushMessage({ to, messages: [message] })),
   logger,
 });
 
@@ -1567,7 +1592,7 @@ function runDailySummary(opts = {}) {
   return dailySummary.run({
     zabbix, omada, hikcentral,
     listUsers: auth.listUsers,
-    send: (to, flex) => lineClient.pushMessage({ to, messages: [{ type: 'flex', altText: '📋 สรุปปัญหาประจำวัน', contents: flex }] }),
+    send: lineHealth.track((to, flex) => lineClient.pushMessage({ to, messages: [{ type: 'flex', altText: '📋 สรุปปัญหาประจำวัน', contents: flex }] })),
     logger,
   }, opts);
 }
@@ -1601,8 +1626,8 @@ app.listen(PORT, () => {
   if (process.env.DAILY_SUMMARY_ENABLED !== 'false') dailyScheduler.start();
 
   // แจ้งเตือน traffic ของ AP เกิน threshold (ปิดอยู่ถ้าไม่ตั้ง OMADA_TRAFFIC_ALERT_*_MBPS) — ส่งผ่าน pushToUsers (allow-list เดิม)
-  if (omada) omadaTrafficAlert.createChecker({ omada, pusher: pushToUsers, logger }).start();
+  if (omada) { omadaChecker = omadaTrafficAlert.createChecker({ omada, pusher: pushToUsers, logger }); omadaChecker.start(); }
 
   // แจ้งเตือน Temperature Alarm จาก HikCentral (กล้องความร้อน) — ปิดอยู่ถ้าไม่ตั้ง HIKCENTRAL_TEMP_ALARM_ENABLED=true และเริ่มที่ DRYRUN (ไม่ส่งจริง)
-  if (hikcentral) hikTempAlarm.createChecker({ hikcentral, pusher: pushToUsers, logger }).start();
+  if (hikcentral) { hikChecker = hikTempAlarm.createChecker({ hikcentral, pusher: pushToUsers, logger }); hikChecker.start(); }
 });

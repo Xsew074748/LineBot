@@ -227,6 +227,7 @@ function createChecker({ hikcentral, pusher, logger = console, env = process.env
   const warned = new Set();
   const warnOnce = (key, msg) => { if (!warned.has(key)) { warned.add(key); logger.warn(msg); } };
   let timer = null; let startTimer = null; let running = false;
+  let lastTickAt = null; let lastResult = null; // ให้ /health/deep ดูว่า loop ยังเดินอยู่ (บันทึกเมื่อ "จบรอบ"; รอบที่ค้างไม่จบ = ไม่ tick)
   let nameCache = { map: {}, at: 0 };
 
   async function resolveNames() {
@@ -297,7 +298,7 @@ function createChecker({ hikcentral, pusher, logger = console, env = process.env
   async function safeCheck() {
     if (running) return;
     running = true;
-    try { await check(); } catch (err) { logger.error(`hik-temp-alarm: ผิดพลาด: ${errText(err)}`); } finally { running = false; }
+    try { const r = await check(); lastResult = (r && r.status) || 'ok'; } catch (err) { lastResult = 'error'; logger.error(`hik-temp-alarm: ผิดพลาด: ${errText(err)}`); } finally { running = false; lastTickAt = now(); }
   }
 
   function start() {
@@ -318,7 +319,10 @@ function createChecker({ hikcentral, pusher, logger = console, env = process.env
     startTimer = null; timer = null;
   }
 
-  return { check, start, stop, config: cfg, getState: () => state };
+  // สถานะ loop สำหรับ /health/deep — เฉพาะเวลา/สถานะ ไม่มีข้อมูลเหตุการณ์
+  const getStatus = () => ({ enabled: cfg.active, intervalMs: cfg.intervalSec * 1000, lastTickAt, lastResult });
+
+  return { check, start, stop, config: cfg, getState: () => state, getStatus };
 }
 
 module.exports = {

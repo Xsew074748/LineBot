@@ -146,6 +146,14 @@ describe('index.js wiring (static guard)', () => {
   });
 
   it('จุดส่งของ adminNotifier ผูกกับ createAdminNotifier (ตัวกรอง ADMIN เท่านั้น) ไม่ใช่ push ตรงหาผู้ใช้', () => {
-    expect(src).toMatch(/adminNotifier = opsAlert\.createAdminNotifier\(\{\s*listUsers: auth\.listUsers,\s*send: \(to, message\) => lineClient\.pushMessage\(/);
+    expect(src).toMatch(/adminNotifier = opsAlert\.createAdminNotifier\(\{\s*listUsers: auth\.listUsers,\s*send: lineHealth\.track\(\(to, message\) => lineClient\.pushMessage\(/);
+  });
+
+  it('จุดส่งครั้งเดียวทุกจุด (pushToUsers, daily summary, adminNotifier) ผ่าน lineHealth.track; push() นับหลัง retry จบ (3 สำเร็จ + 1 ล้ม)', () => {
+    expect(src).toMatch(/const pushToUsers = pushTargets\.createAlertPusher\(\{\s*listUsers: auth\.listUsers,\s*send: lineHealth\.track\(/);
+    expect(src).toMatch(/send: lineHealth\.track\(\(to, flex\) => lineClient\.pushMessage\(/);
+    const fn = src.slice(src.indexOf('async function push(userId, flexContents'), src.indexOf('// Reply with custom QR items only'));
+    expect(fn.match(/lineHealth\.recordSuccess\(\); return true;/g)).toHaveLength(3);
+    expect(fn.match(/lineHealth\.recordFailure\(err3\); return false;/g)).toHaveLength(1);
   });
 });
