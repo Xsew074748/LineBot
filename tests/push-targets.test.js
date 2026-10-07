@@ -141,6 +141,11 @@ describe('index.js wiring (static guard)', () => {
   it('จุดเรียก lineClient.pushMessage มีเท่าที่รู้จักและตรวจผู้รับแล้วเท่านั้น (เพิ่มจุดใหม่ต้องมาทบทวนผู้รับก่อน)', () => {
     const sites = src.split('\n').filter((l) => /lineClient\.pushMessage\(/.test(l));
     // 1 อนุมัติ→ผู้ถูกอนุมัติ, 3 push() หาผู้สั่งที่ผ่าน aiGate, 1 pushToUsers (allow-list), 1 daily summary (ส่งผ่าน APPROVED_ROLES)
-    expect(sites).toHaveLength(6);
+    // + 1 adminNotifier (services/ops-alert.js — กรอง role === 'ADMIN' เท่านั้น; แจ้งบอทล้ม ปิดเป็นค่าเริ่มต้น OPS_CRASH_NOTIFY)
+    expect(sites).toHaveLength(7);
+  });
+
+  it('จุดส่งของ adminNotifier ผูกกับ createAdminNotifier (ตัวกรอง ADMIN เท่านั้น) ไม่ใช่ push ตรงหาผู้ใช้', () => {
+    expect(src).toMatch(/adminNotifier = opsAlert\.createAdminNotifier\(\{\s*listUsers: auth\.listUsers,\s*send: \(to, message\) => lineClient\.pushMessage\(/);
   });
 });

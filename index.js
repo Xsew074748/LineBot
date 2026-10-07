@@ -9,6 +9,25 @@ const line       = require('@line/bot-sdk');
 const path      = require('path');
 const config    = require('./config');
 const logger    = require('./services/logger');
+const redact    = require('./services/redact');
+const crashGuard = require('./services/crash-guard');
+const opsAlert  = require('./services/ops-alert');
+
+// ── จัดการ process ล้ม (ลงทะเบียนก่อนโหลดโมดูลอื่น ให้ครอบถึงตอน startup) ─────────────
+// log รายละเอียดที่ redact แล้ว → (ถ้าเปิด OPS_CRASH_NOTIFY=true) แจ้ง ADMIN หนึ่งครั้งต่อ cooldown → exit(1) ให้ Docker restart ตามเดิม
+// ค่าเริ่มต้น: log อย่างเดียว ไม่ส่ง LINE (ดู services/crash-guard.js)
+let adminNotifier = null; // ตั้งหลังสร้าง lineClient (ด้านล่าง)
+const opsCrashCfg = crashGuard.loadConfig(process.env);
+crashGuard.install({
+  handler: crashGuard.createCrashHandler({
+    logger, redact,
+    getNotifier: () => adminNotifier,
+    notifyEnabled: opsCrashCfg.notify,
+    cooldownMs: opsCrashCfg.cooldownMin * 60_000,
+  }),
+});
+opsCrashCfg.warnings.forEach((w) => logger.warn(`ops: ${w}`));
+logger.info(`ops: crash handler ติดตั้งแล้ว (แจ้ง ADMIN ทาง LINE: ${opsCrashCfg.notify ? 'เปิด, cooldown ' + opsCrashCfg.cooldownMin + ' นาที' : 'ปิด — log อย่างเดียว'})`);
 const auth      = require('./services/auth');
 const fmt       = require('./services/formatter');
 const ai        = require('./services/ai');
@@ -38,6 +57,13 @@ logger.info('Monitors loaded', { enabled: Object.keys(enabledMonitors) });
 // ── LINE Client ────────────────────────────────────────────────────────────────
 const lineClient = new line.messagingApi.MessagingApiClient({
   channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
+});
+
+// ผู้รับ = ADMIN เท่านั้น; ใช้ lineClient.pushMessage ตามเดิม (ไม่ครอบ/แก้ตัวส่ง)
+adminNotifier = opsAlert.createAdminNotifier({
+  listUsers: auth.listUsers,
+  send: (to, message) => lineClient.pushMessage({ to, messages: [message] }),
+  logger,
 });
 
 // ── Express App ────────────────────────────────────────────────────────────────
