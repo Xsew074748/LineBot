@@ -97,6 +97,28 @@
   - `node scripts/hik-temp-alarm-test-send.js` — แสดงข้อความและจำนวนผู้รับ **โดยไม่ส่ง**; ใส่ `--confirm-send` จึงส่งข้อความ "[ทดสอบ]" ถึง **ADMIN เท่านั้น** ผ่าน createAlertPusher เส้นทางเดียวกับของจริง (ไม่พิมพ์ userId) รันในคอนเทนเนอร์: `docker exec <container> node scripts/hik-temp-alarm-test-send.js`
 - ยังไม่ทราบ: ความหน่วงที่ HikCentral บันทึกเหตุการณ์ (จึงค้นเหลื่อมเวลา — ถ้าช้ากว่า LOOKBACK_MIN จะพลาด), กล้องตัวอื่นที่ใช้ eventType เดียวกันหรือไม่, ชนิดเหตุการณ์ความร้อนอื่น (สแกนรหัสช่วงกว้างใน 90 วันแล้วไม่พบ)
 
+## /health/deep — ให้ Zabbix ภายนอกตรวจว่าบอท "ทำงานได้จริง" (services/health-deep.js, services/line-health.js) — ปิดเป็นค่าเริ่มต้น
+- `/health` เดิมไม่เปลี่ยน (ใช้กับ Docker HEALTHCHECK และ tunnel); `/health/deep` เพิ่มมาแยกต่างหาก ไม่เรียก upstream ใดๆ (อ่านตัวนับในหน่วยความจำอย่างเดียว)
+- **ปิดอยู่ถ้าไม่ตั้ง `HEALTH_DEEP_TOKEN`** (ยาว >= 24 ตัวอักษร; สั้นกว่านั้น = ปิด + warning ใน log ที่ไม่พิมพ์ค่า) ส่งผ่าน header `x-health-token` เท่านั้น (ไม่รับทาง query/Bearer); เทียบแบบ timing-safe
+- รหัสตอบ: **200** ปกติ · **503** มีเหตุผิดปกติ (body มี `reasons`) · **401** ไม่มี/ผิด token (body ว่าง) · **404** endpoint ปิดอยู่ · **429** เกิน rate limit 30 ครั้ง/นาที/IP (ไอพีหลัง tunnel อาจเห็นเป็นตัวเดียวกัน — ตั้ง trigger ให้ทนต่อ 429 ชั่วคราว)
+  ทุกคำตอบมี `Cache-Control: no-store`; body มีเฉพาะอายุเป็นวินาที สถานะ และตัวนับ (ไม่มี IP ชื่อกล้อง userId หรือชื่อ key)
+- **กฎที่ทำให้ 503** (เฉพาะสิ่งที่เปิดใช้อยู่):
+  1. checker (`hik-temp-alarm`, `omada-traffic-alert`) ไม่จบรอบเกิน max(3 × interval, 180 วินาที) — ก่อน tick แรกใช้เวลาเริ่มบอทเป็นฐาน (มีช่วงอุ่นเครื่องในตัว); upstream ล่มแต่ loop ยังเดินไม่ถือว่าค้าง (รอบที่ล้มเป็น `fetch-failed` ก็นับเป็น tick)
+  2. ส่ง LINE push ล้มเชิงระบบติดกันถึง `HEALTH_DEEP_LINE_FAIL_THRESHOLD` ครั้ง **และ** ความล้มเหลวล่าสุดไม่เก่ากว่า `HEALTH_DEEP_LINE_FAIL_WINDOW_MIN` นาที — นับต่อ "การส่งหนึ่งครั้ง" หลัง retry ของ `push()`; เชิงระบบ = ไม่มี HTTP status (เครือข่าย/timeout), 429, 401, 403, 5xx; 4xx อื่นของผู้ใช้รายคน (400/404 ฯลฯ) ไม่เพิ่มและไม่รีเซ็ต; สำเร็จหนึ่งครั้งรีเซ็ต
+  - **breaker ของ HikCentral ไม่ทำให้ 503** (แสดงเป็นข้อมูล `hikcentral.breaker` เท่านั้น — upstream ล่มไม่ใช่บอทตาย)
+  - ไม่ได้นับ: push ตอนอนุมัติผู้ใช้, `replyMessage`, drill (คนละโปรเซสกับบอท — ตัวนับไม่ขยับ)
+  - ⚠️ ข้อความ body ของ LINE ตอนโควตา push เต็ม (429) ยังไม่ยืนยันกับของจริง จึงเก็บ `status429` แยกไว้เสมอ ไม่พึ่ง `quotaExhausted` อย่างเดียว
+- ตัวแปร .env: `HEALTH_DEEP_TOKEN` (ไม่ตั้ง = ปิด), `HEALTH_DEEP_LINE_FAIL_THRESHOLD` (1–100, ค่าเริ่มต้น 3), `HEALTH_DEEP_LINE_FAIL_WINDOW_MIN` (1–1440, ค่าเริ่มต้น 60) — ดู `.env.example`; **ห้ามใส่ค่า token ในเอกสาร/แชต/commit**
+- ทดสอบ token ถูกด้วยตัวเอง (ไม่แสดงค่าบนจอ): `read -rs T && curl -s -o /dev/null -w "%{http_code}\n" -H "x-health-token: $T" https://<โดเมน tunnel>/health/deep; unset T`
+- ตั้งใน Zabbix (HTTP agent): `/health` ไม่ใช่ 200 → ระดับสูง; `/health/deep` พร้อม header จาก secret macro, 503 ติดกัน 2–3 ครั้ง → ระดับเตือน (404 = ยังไม่เปิด, 401 = token ไม่ตรง, 429 = รอดูก่อน)
+
+## บอทล้ม (crash guard) และการซ้อมแจ้งเตือน (services/crash-guard.js, ops-alert.js, redact.js, scripts/ops-crash-drill.js)
+- ลงทะเบียน `uncaughtException`/`unhandledRejection` ตั้งแต่ต้น `index.js`: log รายละเอียดที่ **redact แล้ว** (AppKey/AppSecret/token/Bearer/LINE userId/สตริงยาวคล้ายคีย์) → (ถ้าเปิด) แจ้ง ADMIN → `exit(1)` เสมอ ให้ Docker restart ตาม restart policy; hard timeout 5 วินาที; ล้มซ้อนระหว่างปิดตัวแค่ log
+- **`OPS_CRASH_NOTIFY` ค่าเริ่มต้น false** (เฉพาะ "true" เท่านั้นที่เปิด) = log อย่างเดียว ไม่ส่ง LINE; `OPS_CRASH_NOTIFY_COOLDOWN_MIN` (1–1440, ค่าเริ่มต้น 30) = แจ้งซ้ำไม่เกินหนึ่งครั้งต่อช่วงนี้ (เก็บเวลาไว้ใน `data/ops-alert.json` เขียนแบบ atomic ก่อนส่ง; เขียนไม่ได้ = ข้ามการแจ้ง ไม่ค้าง)
+- ผู้รับเฉพาะ `role === 'ADMIN'` เท่านั้น ส่งแบบ best-effort timeout 3 วินาที ไม่แตะ `lineClient.pushMessage` ของจุดส่งเดิม
+- `node scripts/ops-crash-drill.js` — **ค่าเริ่มต้นแสดงตัวอย่างเฉยๆ** (ข้อความ + จำนวนผู้รับ ADMIN + สถานะการตั้งค่า ไม่ส่งอะไร ไม่ทำให้โปรเซสใดล้ม); ใส่ `--confirm-send` จึงส่งข้อความ "[ทดสอบ]" ถึง **ADMIN เท่านั้น** (ไม่พิมพ์ userId) รันในคอนเทนเนอร์: `docker exec <container> node scripts/ops-crash-drill.js`
+- ขั้นเปิดใช้: deploy โดยไม่ตั้ง `OPS_CRASH_NOTIFY` → drill พรีวิว → (ผู้ใช้อนุมัติ) drill `--confirm-send` หนึ่งครั้งและยืนยันว่า ADMIN ได้รับ → สำรอง .env → ตั้ง `OPS_CRASH_NOTIFY=true` → `docker restart`
+
 ## ไฟล์ .env ของ production (อ่านก่อนแก้ทุกครั้ง)
 - ไฟล์ที่ container ใช้จริงคือไฟล์ที่ **mount เข้า container** (ไม่ใช่ .env ในโฟลเดอร์ซอร์ส) — หา path จริงทุกครั้งด้วย `docker inspect <container> --format '{{json .Mounts}}'` แล้วค่อยแก้ ในเอกสารนี้เรียกว่า "โฟลเดอร์ production .env"
 - เป็น bind mount **ไฟล์เดี่ยว**: การแก้แบบ atomic (เขียน .tmp แล้ว rename) ทำให้ container ที่รันอยู่ยังเห็นไฟล์เก่าจนกว่าจะ `docker restart` (restart เพียงพอ ไม่ต้อง recreate ถ้าไม่เปลี่ยน image)
@@ -112,6 +134,13 @@
 6. ส่งทดสอบถึง **ADMIN คนเดียว** ด้วย test-send (ดูก่อนไม่มีธง แล้วค่อย `--confirm-send` ครั้งเดียว) และให้ผู้ใช้ยืนยันว่าได้รับข้อความ
 7. เมื่อผู้ใช้อนุมัติ จึงตั้ง `DRYRUN=false` (สำรอง .env ใหม่ก่อน) แล้ว `docker restart`; ตรวจว่า log ไม่มีคำว่า DRYRUN, state file ถูกสร้างและ watermark เป็นเวลาที่เริ่มใหม่ (ไม่ใช่เหตุการณ์เก่า), ไม่มี push ย้อนหลัง
 8. **Rollback**: คืน .env จากไฟล์สำรอง (หรือตั้ง DRYRUN=true) แล้ว restart; ถ้าต้องย้อน image: ติด tag rollback เป็น `:latest` แล้ว recreate ด้วยพารามิเตอร์เดิม
+
+### ข้อกำหนดเวลาและลำดับที่ใช้จริง (deploy รอบ crash guard + /health/deep, 2026-10-07)
+- **ตรวจเวลาด้วย PowerShell เสมอ** — คำสั่งเต็ม (พิมพ์ทั้ง UTC และเวลาไทย): `$u=[DateTime]::UtcNow; "UTC $($u.ToString('HH:mm:ss')) | ไทย $([System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId($u,'SE Asia Standard Time').ToString('HH:mm:ss'))"` — ใน Git Bash `TZ=Asia/Bangkok date` ไม่ทำงาน ได้เวลา UTC แล้วอ่านผิดเป็นเวลาไทยได้ (เคยพลาดมาแล้ว)
+- **ห้าม recreate/restart ภายใน ±10 นาทีของ 08:00 และ 17:00 (เวลาไทย — daily summary) และห้ามเริ่มหลัง 16:40** ถ้าเกินเวลา ทำได้แค่ขั้นเตรียม (tag, สำรอง, build) แล้วเลื่อน
+- ลำดับ: ตรวจ git สะอาด + production healthy + `/stats` ปกติ (ไม่ `partial`; จดจำนวนอุปกรณ์เป็นค่าอ้างอิง) → ตรวจ `.env` ว่ามีคีย์ใหม่ครบ โดยไม่พิมพ์ค่า (นับบรรทัด/ความยาว) → rollback tag + ยืนยัน ID → สำรอง .env + `cmp` → build จาก commit ที่ทดสอบแล้ว → recreate เฉพาะ container ของบอท → ตรวจ `/health` (ภายในและผ่าน tunnel), `/stats` เทียบเดิม, log (ไม่มี warning ใหม่, ไม่มี push LINE ไม่ตั้งใจ), Manager/cloudflared ไม่เปลี่ยน → drill แบบพรีวิว
+- เพิ่มบรรทัดใหม่ใน .env ที่เป็น bind mount ไฟล์เดี่ยวด้วยการ **ต่อท้ายไฟล์เดิม** (append; ไม่เขียนไฟล์ใหม่แล้ว rename) และเช็กว่าไบต์สุดท้ายเป็น newline ก่อน; สร้างค่าลับในคำสั่งเดียวกับที่เขียน ไม่พิมพ์ออก stdout
+- ทดสอบก่อน deploy ด้วย container ชั่วคราวบนเครือข่าย `--internal` (ไม่มีทางออกอินเทอร์เน็ต ใช้ token LINE ปลอม + mock-lab) แล้วลบให้หมด — ส่ง LINE ถึงผู้ใช้จริงไม่ได้แน่นอน
 
 ## ข้อควรระวัง Manager ที่กระทบบอทนี้
 - ปุ่ม **"อัปเดต Image" ดึง `:latest` จาก Docker Hub โดยไม่ส่ง registry auth** (ใช้ dockerode `pull` เปล่าๆ): ถ้า image ใหม่ยังไม่ได้ push จะดึงของเก่ามาทับ tag `:latest` ในเครื่อง และ recreate รอบหน้าจะกลับไปใช้ของเก่า; ถ้า repo บน Hub เป็น private ปุ่มจะล้ม (pull access denied) — จึงควร build/tag/recreate เองตามขั้นตอนด้านบน และตรวจ `docker images` ก่อน/หลังเสมอ
@@ -152,6 +181,7 @@ production คือ container **netguard-itmonitor** (Manager คุม, ข้
 - production = netguard-itmonitor รัน image ที่ build เองในเครื่องจาก commit ล่าสุด (ยังไม่ได้ push ขึ้น Docker Hub — ดูหัวข้อ deploy) มีฟีเจอร์ Temperature Alarm
   (ส่งจริงแล้ว ตรวจ log ล่าสุด: ไม่มี DRYRUN) และ endpoint /stats/detail ตอบ 200 แล้ว (ตรวจ 2026-10-05); **ยังไม่ยืนยัน** ว่าหน้า "สถิติ" ของ Manager ดึงข้อมูลนี้ครบทุกแท็บ
   daily summary เปิดแล้ว (DAILY_SUMMARY_ENABLED=true, 08:00/17:00 Asia/Bangkok) แก้เวลาผ่าน Manager ได้จริง (ทดสอบแล้ว)
+- 2026-10-07: deploy crash guard + `/health/deep` แล้ว (build ในเครื่องจาก commit fbbd195, ยังไม่ push git/Docker Hub); `OPS_CRASH_NOTIFY` ยังปิด (log อย่างเดียว) และยังไม่ได้ซ้อมส่ง `--confirm-send`; Zabbix item/trigger ของ `/health/deep` เป็นหน้าที่ผู้ใช้ตั้ง; ยังไม่ได้ทำ breaker-watch (แจ้ง ADMIN เมื่อ breaker เปิดนาน)
 - it-monitor-bot (ตัวเก่า): ตรวจ 2026-10-05 ยังมี container อยู่ในสถานะ exited (restart policy = no) — **ยังไม่ถูกลบ** ทั้งที่ตั้งใจจะลบ; ใช้ rollback ฉุกเฉินได้ (docker update --restart=always it-monitor-bot && docker start it-monitor-bot
   แต่ต้องปิด netguard-itmonitor ก่อน เพราะ LINE webhook/daily summary จะซ้ำ); ผู้ใช้เป็นผู้ตัดสินใจลบ (ตรวจ `docker inspect` หา volume ก่อน)
 - รหัส HIKCENTRAL_EVENT_TYPES ของหน้าสถิติ: ตั้งเป็น Temperature Alarm (192517) แล้ว; ใช้กับหน้าสถิติเท่านั้น (ดูหัวข้อ eventRecords)
