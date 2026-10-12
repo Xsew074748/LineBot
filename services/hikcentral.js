@@ -7,6 +7,7 @@ const fs     = require('fs');
 const logger = require('./logger');
 const connectivity = require('./connectivity');
 const { createBreaker, envPositiveInt } = require('./circuit-breaker');
+const { safeMessage } = require('./send-error');
 
 // ── HikCentral OpenAPI (artemis) — AK/SK Signature Authentication ─────────────
 // อ้างอิง: HikCentral Professional OpenAPI Developer Guide V2.6.1
@@ -32,7 +33,7 @@ function buildHttpsAgent() {
       );
       return new https.Agent(opts);
     } catch (err) {
-      logger.warn(`hikcentral: โหลด CA cert ล้มเหลว (${CA_PATH}): ${err.message} → fallback dev insecure`);
+      logger.warn(`hikcentral: โหลด CA cert ล้มเหลว (${CA_PATH}): ${safeMessage(err)} → fallback dev insecure`);
     }
   }
   return new https.Agent({ rejectUnauthorized: false });
@@ -159,7 +160,7 @@ async function getRegionMap() {
     regionCache.expireAt = Date.now() + REGION_CACHE_TTL_MS;
     logger.info(`hikcentral: region map refreshed (${regions.length} regions)`);
   } catch (err) {
-    logger.warn(`hikcentral: getRegions ล้มเหลว — ใช้ region map เดิม (${err.message})`);
+    logger.warn(`hikcentral: getRegions ล้มเหลว — ใช้ region map เดิม (${safeMessage(err)})`);
   }
   return regionCache.map || {};
 }
@@ -270,7 +271,7 @@ async function getCameraIndexCodes() {
     cameraCodeCache.expireAt = Date.now() + CAMERA_CODES_TTL_MS;
   } catch (err) {
     if (!cameraCodeCache.codes) throw err;
-    logger.warn(`hikcentral: ดึงรายชื่อกล้องไม่ได้ ใช้รายการเดิม (${err.message})`);
+    logger.warn(`hikcentral: ดึงรายชื่อกล้องไม่ได้ ใช้รายการเดิม (${safeMessage(err)})`);
   }
   return cameraCodeCache.codes;
 }

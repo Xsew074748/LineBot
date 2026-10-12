@@ -5,6 +5,7 @@ const path       = require('path');
 const axios      = require('axios');
 const auth       = require('../middleware/setupAuth');
 const logger     = require('../services/logger');
+const { safeMessage } = require('../services/send-error');
 // testConnection: ฟังก์ชัน test ของ Omada — Open API client credentials flow
 // เดียวกับ service จริง (POST /openapi/authorize/token) + httpsAgent เดียวกัน
 const { testConnection: omadaTestConn } = require('../services/omada');
@@ -75,7 +76,7 @@ function updateConfigEnabled(service, enabled) {
       fs.writeFileSync(CFG_PATH, src, 'utf8');
     }
   } catch (e) {
-    console.warn('[config.js] updateConfigEnabled failed:', e.message);
+    logger.warn(`config: updateConfigEnabled ล้มเหลว: ${safeMessage(e)}`);
   }
 }
 

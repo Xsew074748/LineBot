@@ -21,6 +21,7 @@ const fs = require('fs');
 const path = require('path');
 const { withTimeout } = require('./stats');
 const { pickNum, TX_KEYS, RX_KEYS } = require('./stats-detail');
+const { safeMessage } = require('./send-error');
 
 const DEFAULT_BUCKET_SEC = 300;
 const RECOVER_RATIO = 0.8;
@@ -196,7 +197,7 @@ function fileStore(file = DEFAULT_STATE_FILE, logger = null) {
         fs.renameSync(tmp, file);
         return true;
       } catch (err) {
-        if (logger) logger.warn(`omada-traffic-alert: บันทึก state ไม่ได้ (${err.code || err.message}) — ใช้ในหน่วยความจำต่อ`);
+        if (logger) logger.warn(`omada-traffic-alert: บันทึก state ไม่ได้ (${err.code || safeMessage(err)}) — ใช้ในหน่วยความจำต่อ`);
         try { fs.unlinkSync(tmp); } catch { /* ไม่มี tmp */ }
         return false;
       }
@@ -225,7 +226,7 @@ function createChecker({ omada, pusher, logger = console, env = process.env, now
       data = await withTimeout(omada.getTrafficActivities(nowSec - windowSec, nowSec), FETCH_TIMEOUT_MS);
       warned.delete('fetch');
     } catch (err) {
-      warnOnce('fetch', `omada-traffic-alert: ดึง traffic ไม่ได้ (${err.code || err.message}) — ข้ามรอบนี้ ไม่แจ้งและไม่เปลี่ยนสถานะ`);
+      warnOnce('fetch', `omada-traffic-alert: ดึง traffic ไม่ได้ (${err.code || safeMessage(err)}) — ข้ามรอบนี้ ไม่แจ้งและไม่เปลี่ยนสถานะ`);
       return { status: 'fetch-failed' };
     }
 
@@ -260,7 +261,7 @@ function createChecker({ omada, pusher, logger = console, env = process.env, now
         const r = await pusher(text, cfg.severity);
         logger.info(`omada-traffic-alert: ส่ง ${action.type} แล้ว (ผู้รับ ${r && r.recipients !== undefined ? r.recipients : '?'}, สำเร็จ ${r && r.sent !== undefined ? r.sent : '?'})`);
       } catch (err) {
-        logger.error(`omada-traffic-alert: ส่ง ${action.type} ไม่สำเร็จ: ${err.message}`);
+        logger.error(`omada-traffic-alert: ส่ง ${action.type} ไม่สำเร็จ: ${safeMessage(err)}`);
       }
     }
     return { status: 'ok', actions: result.actions.map((a) => a.type), state };
@@ -270,7 +271,7 @@ function createChecker({ omada, pusher, logger = console, env = process.env, now
   async function safeCheck() {
     if (running) return;
     running = true;
-    try { const r = await check(); lastResult = (r && r.status) || 'ok'; } catch (err) { lastResult = 'error'; logger.error(`omada-traffic-alert: ผิดพลาด: ${err.message}`); } finally { running = false; lastTickAt = now(); }
+    try { const r = await check(); lastResult = (r && r.status) || 'ok'; } catch (err) { lastResult = 'error'; logger.error(`omada-traffic-alert: ผิดพลาด: ${safeMessage(err)}`); } finally { running = false; lastTickAt = now(); }
   }
 
   function start() {

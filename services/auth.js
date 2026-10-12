@@ -4,6 +4,7 @@ const path = require('path');
 const { ROLES, ROLE_HIERARCHY, COMMAND_PERMISSIONS, AI_CONFIG } = require('../config');
 const { validateLineUserId, validateRole } = require('./validator');
 const logger = require('./logger');
+const { safeError } = require('./send-error');
 
 // ── ที่เก็บข้อมูล User ────────────────────────────────────────────────────────
 const USERS_FILE = path.join(__dirname, '..', 'data', 'users.json');
@@ -19,7 +20,7 @@ function loadUsers() {
     if (!fs.existsSync(USERS_FILE)) return {};
     return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
   } catch (err) {
-    logger.error('auth: โหลด users.json ล้มเหลว', err);
+    logger.error('auth: โหลด users.json ล้มเหลว', safeError(err));
     return {};
   }
 }
@@ -28,7 +29,7 @@ function saveUsers(users) {
   try {
     fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf8');
   } catch (err) {
-    logger.error('auth: บันทึก users.json ล้มเหลว', err);
+    logger.error('auth: บันทึก users.json ล้มเหลว', safeError(err));
   }
 }
 

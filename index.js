@@ -33,7 +33,7 @@ logger.info(`ops: crash handler ติดตั้งแล้ว (แจ้ง 
 const auth      = require('./services/auth');
 const fmt       = require('./services/formatter');
 const { buildHostContextText, countView, isCameraUp } = require('./services/host-status');
-const { safeError } = require('./services/send-error');
+const { safeError, safeMessage } = require('./services/send-error');
 const { userTag } = require('./services/user-tag');
 const connectivity = require('./services/connectivity');
 const { createHealthHandler } = require('./services/health');
@@ -253,7 +253,7 @@ async function runAiJob(userId, kind, job) {
       return;
     }
     // AI ล้มเหลว (ai.js throw หลัง retry ครบ) → แจ้ง user โดยไม่หัก quota
-    logger.warn(`aiJob[${kind}]: AI ล้มเหลว ไม่หัก quota (user=${userTag(userId)}): ${err.message}`);
+    logger.warn(`aiJob[${kind}]: AI ล้มเหลว ไม่หัก quota (user=${userTag(userId)}): ${safeMessage(err)}`);
     await push(userId, fmt.buildError('AI ไม่ว่างในขณะนี้ กรุณาลองใหม่ในอีกสักครู่ (ไม่นับโควต้า)'), [],
       `aiJob[${kind}] error-notice userId=${userId}`);
     return;
@@ -370,7 +370,7 @@ app.get('/stats/detail', setupAuth.lanOnly, async (req, res) => {
     detailCache.set(key, { data, expireAt: Date.now() + (data.partial ? DETAIL_PARTIAL_CACHE_TTL_MS : DETAIL_CACHE_TTL_MS) });
     res.json(data);
   } catch (err) {
-    logger.warn(`/stats/detail ล้มเหลว: ${err.message}`);
+    logger.warn(`/stats/detail ล้มเหลว: ${safeMessage(err)}`);
     res.status(500).json({ ok: false, error: 'detail-failed' });
   }
 });
@@ -1428,7 +1428,7 @@ async function reply(replyToken, flexContents, extraQR = []) {
   try {
     await lineClient.replyMessage(payload);
   } catch (err) {
-    logger.warn(`reply: ล้มเหลวครั้งแรก (${err.message}) — retrying without quickReply`);
+    logger.warn(`reply: ล้มเหลวครั้งแรก (${safeMessage(err)}) — retrying without quickReply`);
     if (err.body) logger.warn(`reply: LINE error body=${redact(err.body)}`);
     try {
       await lineClient.replyMessage({
@@ -1460,7 +1460,7 @@ async function push(userId, flexContents, extraQR = [], label = 'push') {
     await lineClient.pushMessage({ to: userId, messages: [{ ...flexMsg, quickReply: fmt.quickReply(extraQR) }] });
     lineHealth.recordSuccess(); return true;
   } catch (err) {
-    logger.warn(`push: ล้มเหลวครั้งแรก [${label}] (${err.message}) — retrying without quickReply`);
+    logger.warn(`push: ล้มเหลวครั้งแรก [${label}] (${safeMessage(err)}) — retrying without quickReply`);
     if (err.body) logger.warn(`push: LINE error body=${redact(err.body)}`);
     try {
       await lineClient.pushMessage({ to: userId, messages: [flexMsg] });
@@ -1493,7 +1493,7 @@ async function replyCustomQR(replyToken, flexContents, qrItems) {
   try {
     await lineClient.replyMessage(payload);
   } catch (err) {
-    logger.warn(`replyCustomQR: ${err.message}`);
+    logger.warn(`replyCustomQR: ${safeMessage(err)}`);
     try {
       await lineClient.replyMessage({ replyToken, messages: [{ type: 'flex', altText: ALT_TEXT, contents: flexContents }] });
     } catch (err2) {
@@ -1565,7 +1565,7 @@ async function handleZabbixPush(body) {
   try {
     analysis = await ai.analyzeAlert(alert);
   } catch (err) {
-    logger.warn(`zabbix-webhook: AI วิเคราะห์ไม่ได้ — push ต่อโดยไม่มี AI (${err.message})`);
+    logger.warn(`zabbix-webhook: AI วิเคราะห์ไม่ได้ — push ต่อโดยไม่มี AI (${safeMessage(err)})`);
   }
 
   const flex = fmt.buildAlerts(processed, analysis);

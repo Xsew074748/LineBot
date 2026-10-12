@@ -18,7 +18,7 @@ const DEFAULT_TIMES = ['08:00', '17:00'];
 const MAX_TIMES = 24;
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const SETTINGS_PATH = path.join(__dirname, '..', 'data', 'settings.json');
-const { describeSendError } = require('./send-error');
+const { describeSendError, safeError } = require('./send-error');
 const { APPROVED_ROLES } = require('../config'); // allow-list กลาง ใช้ร่วมกับ alert (services/push-targets.js)
 const MAX_PER_SECTION = 8;
 
@@ -256,7 +256,7 @@ function createScheduler({ runFn, logger, loadTimes = readTimesFromFile }) {
     const exprs = times.map((v) => { const [h, m] = v.split(':').map(Number); return `${m} ${h} * * *`; });
     tasks = times.map((label, i) => cron.schedule(exprs[i], async () => {
       try { await runFn(label); }
-      catch (err) { logger.error('daily-summary: รันตามเวลาล้มเหลว', err); }
+      catch (err) { logger.error('daily-summary: รันตามเวลาล้มเหลว', safeError(err)); }
     }, { timezone: TZ }));
     state = { times, exprs };
   }

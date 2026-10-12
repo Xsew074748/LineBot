@@ -10,6 +10,7 @@
 // - ไม่ log/คืน LINE userId (รายงานแค่จำนวน)
 const fs = require('fs');
 const path = require('path');
+const { safeMessage } = require('./send-error');
 
 const DEFAULT_FILE = path.join(__dirname, '..', 'data', 'ops-alert.json');
 const DEFAULT_TIMEOUT_MS = 3000;
@@ -42,7 +43,7 @@ function createAdminNotifier({ listUsers, send, logger = console, now = Date.now
     try {
       admins = (listUsers() || []).filter((u) => u && u.role === 'ADMIN' && typeof u.id === 'string' && u.id);
     } catch (err) {
-      logger.warn(`ops-alert[${key}]: อ่านรายชื่อผู้ใช้ไม่ได้ (${err && err.message}) — ข้ามการแจ้ง`);
+      logger.warn(`ops-alert[${key}]: อ่านรายชื่อผู้ใช้ไม่ได้ (${safeMessage(err)}) — ข้ามการแจ้ง`);
       return { sent: 0, recipients: 0, skipped: 'list-users-failed' };
     }
     if (!admins.length) {

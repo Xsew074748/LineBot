@@ -24,6 +24,7 @@
 const fs = require('fs');
 const path = require('path');
 const { withTimeout } = require('./stats');
+const { safeMessage } = require('./send-error');
 
 const DEFAULT_TYPES = [192517];
 const DEFAULT_LOOKBACK_MIN = 30;
@@ -130,7 +131,7 @@ function fileStore(file = DEFAULT_STATE_FILE, logger = null) {
         fs.renameSync(tmp, file);
         return true;
       } catch (err) {
-        if (logger) logger.warn(`hik-temp-alarm: บันทึก state ไม่ได้ (${err.code || err.message}) — ใช้ในหน่วยความจำต่อ`);
+        if (logger) logger.warn(`hik-temp-alarm: บันทึก state ไม่ได้ (${err.code || safeMessage(err)}) — ใช้ในหน่วยความจำต่อ`);
         try { fs.unlinkSync(tmp); } catch { /* ไม่มี tmp */ }
         return false;
       }

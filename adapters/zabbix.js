@@ -3,6 +3,7 @@ const BaseMonitorAdapter = require('./base');
 const zabbixService     = require('../services/zabbix');
 const logger            = require('../services/logger');
 const { viewStatus }    = require('../services/host-status');
+const { safeError } = require('../services/send-error');
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -38,7 +39,7 @@ class ZabbixAdapter extends BaseMonitorAdapter {
       const r = await zabbixService.healthCheck();
       return { ok: r.ok, message: r.error || 'เชื่อมต่อ Zabbix สำเร็จ' };
     } catch (err) {
-      logger.error('ZabbixAdapter.testConnection', err);
+      logger.error('ZabbixAdapter.testConnection', safeError(err));
       return { ok: false, message: err.message };
     }
   }
@@ -57,7 +58,7 @@ class ZabbixAdapter extends BaseMonitorAdapter {
         severity:  p.priority,
       }));
     } catch (err) {
-      logger.error('ZabbixAdapter.getProblems', err);
+      logger.error('ZabbixAdapter.getProblems', safeError(err));
       throw err;
     }
   }
@@ -73,7 +74,7 @@ class ZabbixAdapter extends BaseMonitorAdapter {
         ip:     h.interfaces?.[0]?.ip || null,
       }));
     } catch (err) {
-      logger.error('ZabbixAdapter.getDevices', err);
+      logger.error('ZabbixAdapter.getDevices', safeError(err));
       throw err;
     }
   }

@@ -2,6 +2,7 @@
 const BaseMonitorAdapter = require('./base');
 const omadaService      = require('../services/omada');
 const logger            = require('../services/logger');
+const { safeError } = require('../services/send-error');
 
 class OmadaAdapter extends BaseMonitorAdapter {
   async testConnection() {
@@ -9,7 +10,7 @@ class OmadaAdapter extends BaseMonitorAdapter {
       const r = await omadaService.healthCheck();
       return { ok: r.ok, message: r.error || 'เชื่อมต่อ Omada สำเร็จ' };
     } catch (err) {
-      logger.error('OmadaAdapter.testConnection', err);
+      logger.error('OmadaAdapter.testConnection', safeError(err));
       return { ok: false, message: err.message };
     }
   }
@@ -30,7 +31,7 @@ class OmadaAdapter extends BaseMonitorAdapter {
         severity:  e.level.includes('วิกฤต') ? 5 : 2,
       }));
     } catch (err) {
-      logger.error('OmadaAdapter.getProblems', err);
+      logger.error('OmadaAdapter.getProblems', safeError(err));
       throw err;
     }
   }
@@ -47,7 +48,7 @@ class OmadaAdapter extends BaseMonitorAdapter {
         ip:     d.ip || null,
       }));
     } catch (err) {
-      logger.error('OmadaAdapter.getDevices', err);
+      logger.error('OmadaAdapter.getDevices', safeError(err));
       throw err;
     }
   }

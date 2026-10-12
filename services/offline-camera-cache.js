@@ -1,4 +1,5 @@
 'use strict';
+const { safeError } = require('./send-error');
 // cache กล้องออฟไลน์ของ Zabbix สำหรับคำสั่ง "กล้องดับ" (poller ดึงทุก 90 วินาที)
 // ensure() คืน null เมื่อ "ไม่มีข้อมูลเลยและดึงสดไม่ได้" — ผู้เรียกต้องตอบว่าดึงข้อมูลไม่ได้
 // ห้ามแปลงเป็น { total: 0 } เพราะผู้ใช้จะเข้าใจว่าไม่มีกล้องดับทั้งที่ไม่รู้สถานะ
@@ -19,7 +20,7 @@ function createOfflineCameraCache({ fetchRaw, logger, now = Date.now }) {
       if (isTimeout) {
         logger.warn(`poller: Zabbix timeout — ใช้ cache เดิมต่อ (cached total=${raw?.total ?? 'none'})`);
       } else {
-        logger.error('poller: offline camera refresh failed', err);
+        logger.error('poller: offline camera refresh failed', safeError(err));
       }
       return false;
     }

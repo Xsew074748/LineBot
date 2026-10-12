@@ -1,5 +1,6 @@
 'use strict';
 const logger = require('./logger');
+const { safeError } = require('./send-error');
 
 // ── Defaults (override ผ่าน opts หรือส่ง config.CORRELATION_CONFIG มา) ─────────
 const DEFAULT_LOOKBACK_SEC    = 300;
@@ -107,7 +108,7 @@ function correlate(alerts, opts = {}) {
     });
 
   } catch (err) {
-    logger.error('correlate: unexpected error', err);
+    logger.error('correlate: unexpected error', safeError(err));
     return [];
   }
 }

@@ -5,6 +5,7 @@ const https = require('https');
 const axios = require('axios');
 const logger = require('./logger');
 const connectivity = require('./connectivity');
+const { safeMessage } = require('./send-error');
 
 const BASE_URL     = process.env.OMADA_URL           || '';
 const OMADAC_ID     = process.env.OMADA_OMADAC_ID     || '';
@@ -31,7 +32,7 @@ function buildHttpsAgent() {
       );
       return new https.Agent(opts);
     } catch (err) {
-      logger.warn(`omada: โหลด CA cert ล้มเหลว (${CA_PATH}): ${err.message} → fallback dev insecure`);
+      logger.warn(`omada: โหลด CA cert ล้มเหลว (${CA_PATH}): ${safeMessage(err)} → fallback dev insecure`);
     }
   }
   // dev/LAN mode — rejectUnauthorized: false เฉพาะ agent นี้ ไม่กระทบ TLS ของ process อื่น
@@ -177,7 +178,7 @@ async function getClients(siteId = SITE_ID) {
     data = await omadaGetAll((page) =>
       `/openapi/v1/${OMADAC_ID}/sites/${siteId}/clients?pageSize=${OMADA_PAGE_SIZE}&page=${page}`);
   } catch (err) {
-    logger.warn(`omada: getClients ล้มเหลว: ${err.message}`);
+    logger.warn(`omada: getClients ล้มเหลว: ${safeMessage(err)}`);
     return { total: 0, wireless: 0, wired: 0, clients: [], unavailable: true };
   }
   const total = data.length;
@@ -243,7 +244,7 @@ async function getAlerts(siteId = SITE_ID) {
       level: e.level === 0 ? '⚠️ เตือน' : '🔴 วิกฤต',
     }));
   } catch (err) {
-    logger.warn(`omada: getAlerts ล้มเหลว (endpoint ยังไม่ยืนยัน): ${err.message}`);
+    logger.warn(`omada: getAlerts ล้มเหลว (endpoint ยังไม่ยืนยัน): ${safeMessage(err)}`);
     return [];
   }
 }

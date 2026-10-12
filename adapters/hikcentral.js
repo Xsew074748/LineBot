@@ -2,6 +2,7 @@
 const BaseMonitorAdapter = require('./base');
 const hikService         = require('../services/hikcentral');
 const logger             = require('../services/logger');
+const { safeError } = require('../services/send-error');
 
 class HikCentralAdapter extends BaseMonitorAdapter {
   async testConnection() {
@@ -9,7 +10,7 @@ class HikCentralAdapter extends BaseMonitorAdapter {
       const r = await hikService.healthCheck();
       return { ok: r.ok, message: r.error || 'เชื่อมต่อ HikCentral สำเร็จ' };
     } catch (err) {
-      logger.error('HikCentralAdapter.testConnection', err);
+      logger.error('HikCentralAdapter.testConnection', safeError(err));
       return { ok: false, message: err.message };
     }
   }
@@ -33,7 +34,7 @@ class HikCentralAdapter extends BaseMonitorAdapter {
           severity:  3,
         }));
     } catch (err) {
-      logger.error('HikCentralAdapter.getProblems', err);
+      logger.error('HikCentralAdapter.getProblems', safeError(err));
       throw err;
     }
   }
@@ -49,7 +50,7 @@ class HikCentralAdapter extends BaseMonitorAdapter {
         ip:     null,
       }));
     } catch (err) {
-      logger.error('HikCentralAdapter.getDevices', err);
+      logger.error('HikCentralAdapter.getDevices', safeError(err));
       throw err;
     }
   }

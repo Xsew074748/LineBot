@@ -1,4 +1,5 @@
 'use strict';
+const { safeMessage, safeError } = require('../send-error');
 // retry + backoff ร่วมของ AI provider ทั้ง 3 ตัว — เปลี่ยนเฉพาะ "จำนวนครั้ง" และ "ช่วงรอ" ของ retry เดิม
 // ไม่แตะ logic การเรียก provider ใน callXxx
 //
@@ -33,16 +34,16 @@ async function withRetry({ provider, label, maxAttempts = DEFAULT_MAX_ATTEMPTS, 
       const diag = err && err.diag ? ` [${err.diag}]` : '';
       // หมดเวลารอ → ไม่ retry: รออีกรอบเท่ากับรอเป็นหลายเท่า ผู้ใช้จะรอนานเกินไป ให้ caller แจ้ง error ทันที
       if (err && err.isTimeout) {
-        logger.error(`ai-providers/${provider}: ${err.message}`);
+        logger.error(`ai-providers/${provider}: ${safeMessage(err)}`);
         throw err;
       }
       if (attempt < maxAttempts) {
         const wait = isBusy(err) ? backoffMs(attempt) : 0;
-        logger.warn(`ai-providers/${provider}: attempt ${attempt}/${maxAttempts} ล้มเหลว: ${err.message}${diag} — retry${wait ? ` ในอีก ${wait}ms` : ''}`);
+        logger.warn(`ai-providers/${provider}: attempt ${attempt}/${maxAttempts} ล้มเหลว: ${safeMessage(err)}${diag} — retry${wait ? ` ในอีก ${wait}ms` : ''}`);
         if (wait) await timers.sleep(wait);
         continue;
       }
-      logger.error(`ai-providers/${provider}: ${label} ล้มเหลวทั้ง ${maxAttempts} ครั้ง${diag}`, err);
+      logger.error(`ai-providers/${provider}: ${label} ล้มเหลวทั้ง ${maxAttempts} ครั้ง${diag}`, safeError(err));
       throw err;
     }
   }
