@@ -34,6 +34,7 @@ const auth      = require('./services/auth');
 const fmt       = require('./services/formatter');
 const { buildHostContextText, countView, isCameraUp } = require('./services/host-status');
 const { safeError } = require('./services/send-error');
+const { userTag } = require('./services/user-tag');
 const connectivity = require('./services/connectivity');
 const { createHealthHandler } = require('./services/health');
 const { createOfflineCameraCache } = require('./services/offline-camera-cache');
@@ -237,7 +238,7 @@ async function startAiJob(userId, replyToken, kind, job, ackText = AI_ACK_TEXT) 
   // ไม่ await — ให้ webhook ตอบ LINE ได้ทันที; error ทุกกรณีถูกจัดการใน runAiJob แล้ว
   // catch ตรงนี้เป็นแค่ตาข่ายสุดท้ายกัน unhandled rejection
   runAiJob(userId, kind, job)
-    .catch((err) => logger.error(`aiJob[${kind}]: unexpected error userId=${userId}`, safeError(err)))
+    .catch((err) => logger.error(`aiJob[${kind}]: unexpected error user=${userTag(userId)}`, safeError(err)))
     .finally(release);
 }
 
@@ -252,7 +253,7 @@ async function runAiJob(userId, kind, job) {
       return;
     }
     // AI ล้มเหลว (ai.js throw หลัง retry ครบ) → แจ้ง user โดยไม่หัก quota
-    logger.warn(`aiJob[${kind}]: AI ล้มเหลว ไม่หัก quota (userId=${userId}): ${err.message}`);
+    logger.warn(`aiJob[${kind}]: AI ล้มเหลว ไม่หัก quota (user=${userTag(userId)}): ${err.message}`);
     await push(userId, fmt.buildError('AI ไม่ว่างในขณะนี้ กรุณาลองใหม่ในอีกสักครู่ (ไม่นับโควต้า)'), [],
       `aiJob[${kind}] error-notice userId=${userId}`);
     return;
@@ -262,7 +263,7 @@ async function runAiJob(userId, kind, job) {
   const sent = await push(userId, flex, [], `aiJob[${kind}] result userId=${userId}`);
   if (!sent) {
     // AI สำเร็จ (นับ quota แล้ว) แต่ส่งผลไม่ถึงผู้ใช้ — log ให้ชัดเพื่อ debug
-    logger.error(`aiJob[${kind}]: push ผลไม่สำเร็จ userId=${userId}`);
+    logger.error(`aiJob[${kind}]: push ผลไม่สำเร็จ user=${userTag(userId)}`);
   }
 }
 
@@ -438,11 +439,11 @@ async function handleEvent(event) {
 
   // Timestamp freshness check (ป้องกัน Replay Attack)
   if (!validator.isTimestampFresh(event.timestamp)) {
-    logger.warn(`webhook: stale event from ${userId} (age=${Date.now() - event.timestamp}ms)`);
+    logger.warn(`webhook: stale event from ${userTag(userId)} (age=${Date.now() - event.timestamp}ms)`);
     return;
   }
 
-  logger.message(userId, rawText);
+  logger.message(userTag(userId), rawText);
 
   // Auto-register user ใหม่เป็น PENDING (ถ้ายังไม่มีในระบบ)
   auth.registerPending(userId);
@@ -470,7 +471,7 @@ async function handleEvent(event) {
   try {
     await route(text, rawText, userId, replyToken);
   } catch (err) {
-    logger.error(`handleEvent: userId=${userId}`, safeError(err));
+    logger.error(`handleEvent: user=${userTag(userId)}`, safeError(err));
     await reply(replyToken, fmt.buildError('เกิดข้อผิดพลาดที่ไม่คาดคิด'));
   }
 }
@@ -482,11 +483,11 @@ async function handlePostback(event) {
   const data       = String(event.postback?.data || '');
 
   if (!validator.isTimestampFresh(event.timestamp)) {
-    logger.warn(`postback: stale event from ${userId}`);
+    logger.warn(`postback: stale event from ${userTag(userId)}`);
     return;
   }
 
-  logger.message(userId, `[postback] ${data}`);
+  logger.message(userTag(userId), `[postback] ${data}`);
   auth.registerPending(userId);
 
   if (!checkUserRateLimit(userId)) {
@@ -502,7 +503,7 @@ async function handlePostback(event) {
   try {
     if (data.startsWith('analyze:')) return await handleAnalyze(data, userId, replyToken);
   } catch (err) {
-    logger.error(`handlePostback: userId=${userId}`, safeError(err));
+    logger.error(`handlePostback: user=${userTag(userId)}`, safeError(err));
     await reply(replyToken, fmt.buildError('เกิดข้อผิดพลาดที่ไม่คาดคิด'));
   }
 }

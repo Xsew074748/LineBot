@@ -46,6 +46,7 @@
 - **ยังไม่ทำ**: Manager ยังคำนวณ "Host ที่ down" = total − up (นับ unknown เป็น down) จนกว่าจะเพิ่มคอลัมน์ effective ใน stats-db (ดู NetguardManager branch feat/hosts-effective)
 - **"กล้องดับ" ห้ามตอบ 0 เมื่อดึงข้อมูลไม่ได้**: cache ว่างและดึงสดล้ม (ทุกชนิด error) ต้องตอบว่าดึงข้อมูลไม่ได้ ไม่ใช่ "ไม่มีกล้องดับ"; `ensure()` ของ offline-camera-cache คืน `null` ในกรณีนี้ ส่วนรอบถัดไปที่ล้มจะคง cache เดิมไว้ (ไม่ล้าง) และข้อความแสดงอายุข้อมูล
 - **log การส่ง LINE ล้มเหลว**: ระบุผู้รับเป็นลำดับ ("ผู้รับ #N/M") ห้ามใส่ userId ลง log; ใช้ `describeSendError(err)` (message + status + body ที่ผ่าน redact ตัดไม่เกิน 300 ตัวอักษร) ห้ามส่ง error object ดิบหรือ `err.body` ดิบให้ logger — เส้นทาง daily summary และ `pushToUsers` ทำตามนี้แล้ว ส่วน `reply()`/`push()` ใน index.js redact เฉพาะ `err.body` (ยังส่ง error object ดิบให้ logger บางจุด — ยังไม่ได้เก็บ)
+- **ข้อความ log ทั่วไปใน index.js ใช้ `userTag(userId)` (services/user-tag.js) แทน userId ดิบ**: HMAC-SHA256 กุญแจ = LINE_CHANNEL_SECRET ตัดเหลือ 6 hex ("u-1a2b3c") — ย้อนกลับไม่ได้ เสถียรข้าม restart ไล่ log ของคนเดียวกันได้; มีเทสต์ระดับซอร์สที่ล้มทันทีถ้ามีบรรทัด `logger.info/warn/error/message` ที่อ้าง `userId` โดยไม่ผ่าน `userTag`; ยกเว้นโดยตั้งใจ: `logger.audit` (audit.log ต้องระบุผู้กระทำ/เป้าหมายจริง) — ที่ยังไม่ได้แก้: `services/auth.js` log ตอนลงทะเบียนผู้ใช้ใหม่ที่ยังรออนุมัติ (ยังมี userId เต็ม)
 - เอกสารนี้และเอกสารอื่นในรีโป (public) ห้ามมี userId, โดเมน tunnel, รหัสกล้อง, IP จริง (ดูหัวข้อ "ความปลอดภัยการเผยแพร่")
 
 ## สถานะการเชื่อมต่อออฟฟิศ (services/connectivity.js, services/health.js)
