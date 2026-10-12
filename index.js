@@ -33,6 +33,7 @@ logger.info(`ops: crash handler ติดตั้งแล้ว (แจ้ง 
 const auth      = require('./services/auth');
 const fmt       = require('./services/formatter');
 const { buildHostContextText, countHostStatus } = require('./services/host-status');
+const { safeError } = require('./services/send-error');
 const { createOfflineCameraCache } = require('./services/offline-camera-cache');
 const ai        = require('./services/ai');
 const aiProviders = require('./services/ai-providers');
@@ -233,7 +234,7 @@ async function startAiJob(userId, replyToken, kind, job, ackText = AI_ACK_TEXT) 
   // ไม่ await — ให้ webhook ตอบ LINE ได้ทันที; error ทุกกรณีถูกจัดการใน runAiJob แล้ว
   // catch ตรงนี้เป็นแค่ตาข่ายสุดท้ายกัน unhandled rejection
   runAiJob(userId, kind, job)
-    .catch((err) => logger.error(`aiJob[${kind}]: unexpected error userId=${userId}`, err))
+    .catch((err) => logger.error(`aiJob[${kind}]: unexpected error userId=${userId}`, safeError(err)))
     .finally(release);
 }
 
@@ -414,7 +415,7 @@ app.post('/zabbix-webhook', express.json({ limit: '10kb' }), async (req, res) =>
   try {
     await handleZabbixPush(req.body);
   } catch (err) {
-    logger.error('zabbix-webhook: error', err);
+    logger.error('zabbix-webhook: error', safeError(err));
   }
 });
 
@@ -467,7 +468,7 @@ async function handleEvent(event) {
   try {
     await route(text, rawText, userId, replyToken);
   } catch (err) {
-    logger.error(`handleEvent: userId=${userId}`, err);
+    logger.error(`handleEvent: userId=${userId}`, safeError(err));
     await reply(replyToken, fmt.buildError('เกิดข้อผิดพลาดที่ไม่คาดคิด'));
   }
 }
@@ -499,7 +500,7 @@ async function handlePostback(event) {
   try {
     if (data.startsWith('analyze:')) return await handleAnalyze(data, userId, replyToken);
   } catch (err) {
-    logger.error(`handlePostback: userId=${userId}`, err);
+    logger.error(`handlePostback: userId=${userId}`, safeError(err));
     await reply(replyToken, fmt.buildError('เกิดข้อผิดพลาดที่ไม่คาดคิด'));
   }
 }
@@ -1432,7 +1433,7 @@ async function reply(replyToken, flexContents, extraQR = []) {
         messages: [{ type: 'flex', altText: ALT_TEXT, contents: flexContents }],
       });
     } catch (err2) {
-      logger.error('reply: ล้มเหลวทั้ง 2 ครั้ง — ส่ง text fallback', err2);
+      logger.error('reply: ล้มเหลวทั้ง 2 ครั้ง — ส่ง text fallback', safeError(err2));
       if (err2.body) logger.error(`reply: LINE error body=${redact(err2.body)}`);
       // Flex ถูก reject ทั้ง 2 รอบ (เช่น payload เกิน/format ผิด) — อย่าปล่อยให้ user เงียบ
       try {
@@ -1441,7 +1442,7 @@ async function reply(replyToken, flexContents, extraQR = []) {
           messages: [{ type: 'text', text: 'ขออภัย เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง' }],
         });
       } catch (err3) {
-        logger.error('reply: text fallback ก็ล้มเหลว (replyToken อาจหมดอายุ)', err3);
+        logger.error('reply: text fallback ก็ล้มเหลว (replyToken อาจหมดอายุ)', safeError(err3));
       }
     }
   }
@@ -1462,13 +1463,13 @@ async function push(userId, flexContents, extraQR = [], label = 'push') {
       await lineClient.pushMessage({ to: userId, messages: [flexMsg] });
       lineHealth.recordSuccess(); return true;
     } catch (err2) {
-      logger.error(`push: ล้มเหลวทั้ง 2 ครั้ง [${label}] — ส่ง text fallback`, err2);
+      logger.error(`push: ล้มเหลวทั้ง 2 ครั้ง [${label}] — ส่ง text fallback`, safeError(err2));
       if (err2.body) logger.error(`push: LINE error body=${redact(err2.body)}`);
       try {
         await lineClient.pushMessage({ to: userId, messages: [{ type: 'text', text: 'ขออภัย เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง' }] });
         lineHealth.recordSuccess(); return true;
       } catch (err3) {
-        logger.error(`push: text fallback ก็ล้มเหลว [${label}]`, err3);
+        logger.error(`push: text fallback ก็ล้มเหลว [${label}]`, safeError(err3));
         lineHealth.recordFailure(err3); return false;
       }
     }
@@ -1493,14 +1494,14 @@ async function replyCustomQR(replyToken, flexContents, qrItems) {
     try {
       await lineClient.replyMessage({ replyToken, messages: [{ type: 'flex', altText: ALT_TEXT, contents: flexContents }] });
     } catch (err2) {
-      logger.error('replyCustomQR: failed — ส่ง text fallback', err2);
+      logger.error('replyCustomQR: failed — ส่ง text fallback', safeError(err2));
       try {
         await lineClient.replyMessage({
           replyToken,
           messages: [{ type: 'text', text: 'ขออภัย เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง' }],
         });
       } catch (err3) {
-        logger.error('replyCustomQR: text fallback ก็ล้มเหลว', err3);
+        logger.error('replyCustomQR: text fallback ก็ล้มเหลว', safeError(err3));
       }
     }
   }

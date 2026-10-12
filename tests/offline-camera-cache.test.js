@@ -91,3 +91,18 @@ describe('index.js — คำสั่ง "กล้องดับ" และ�
     expect((src.match(/LINE error body=\$\{redact\(err2?\.body\)\}/g) || []).length).toBe(4);
   });
 });
+
+// ── index.js ต้องไม่ส่ง error object ดิบให้ logger อีก (ก่อนแก้มี 10 จุด) ──
+describe('index.js — logger ไม่รับ error object ดิบ', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'index.js'), 'utf8').replace(/\r\n/g, '\n');
+  const raw = src.split('\n').filter((l) => /logger\.(error|warn)\(.*,\s*(err[0-9]?|e|error)\s*\)/.test(l));
+
+  it('ไม่เหลือจุดที่ส่ง err / err2 / err3 ดิบให้ logger.error/warn', () => {
+    expect(raw).toEqual([]);
+  });
+
+  it('ใช้ safeError ห่อแทนอย่างน้อย 10 จุด และนำเข้าจาก services/send-error', () => {
+    expect(src).toMatch(/require\('\.\/services\/send-error'\)/);
+    expect((src.match(/safeError\(/g) || []).length).toBeGreaterThanOrEqual(10);
+  });
+});

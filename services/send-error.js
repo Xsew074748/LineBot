@@ -28,4 +28,25 @@ function describeSendError(err) {
   }
 }
 
-module.exports = { describeSendError };
+const IPV4 = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;
+const STACK_FRAME = /^\s+at /;
+const maskIps = (t) => String(t).replace(IPV4, '<ip>');
+
+// ใช้แทนการส่ง error object ดิบให้ logger — logger.error พิมพ์ err.stack ซึ่งมีข้อความ error เดิมอยู่ด้วย (อาจมี IP/userId/token)
+// คืน Error ใหม่: ข้อความ = describeSendError (redact + status/body) แล้วปิดบัง IPv4; stack = เฟรมเดิม (ยังไล่ได้ว่าพังที่ไหน)
+// ส่วนหัวของ stack เป็นข้อความที่ปิดบังแล้ว; ไม่แก้ error เดิม และห้าม throw
+function safeError(err) {
+  try {
+    const e = new Error(maskIps(describeSendError(err)));
+    const stack = err && typeof err === 'object' && typeof err.stack === 'string' ? err.stack : null;
+    if (stack) {
+      const frames = stack.split('\n').filter((l) => STACK_FRAME.test(l)).map(maskIps).join('\n');
+      e.stack = `${err.name || 'Error'}: ${e.message}${frames ? '\n' + frames : ''}`;
+    }
+    return e;
+  } catch {
+    return new Error('unreadable error');
+  }
+}
+
+module.exports = { describeSendError, safeError };
