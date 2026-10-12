@@ -3,6 +3,7 @@
 // เป็น pure function รับ dependency เข้ามา (ไม่ผูกกับ index.js) เพื่อ unit test ได้ง่าย
 
 const { mergeSystems } = require('./camera-identity');
+const { countHostStatus } = require('./host-status');
 
 const DEFAULT_TIMEOUT_MS = 4000; // เผื่อ overhead ให้ตอบทันภายใน 5 วินาทีตามที่กำหนด
 
@@ -37,7 +38,8 @@ function processProblemCounts(problems) {
 //
 // ติดตามความสำเร็จ/ล้มเหลวแยกราย "monitor" (ไม่ใช่รายชนิดข้อมูล) — zabbix มีทั้ง
 // problems/hosts/cameras ถ้าตัวใดตัวหนึ่ง timeout/fail ถือว่า zabbix เป็น partial
-async function buildStats({ monitorKeys = [], zabbix = null, omada = null, hikcentral = null, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+//   now — ฟังก์ชันคืนเวลา ms (ฉีดไว้ให้ทดสอบ) ใช้ทำ refreshedAt
+async function buildStats({ monitorKeys = [], zabbix = null, omada = null, hikcentral = null, timeoutMs = DEFAULT_TIMEOUT_MS, now = Date.now } = {}) {
   const jobs = {};
   if (zabbix)     jobs.problems    = withTimeout(zabbix.getProblems(200), timeoutMs);
   if (zabbix)     jobs.hosts       = withTimeout(zabbix.getHosts(200), timeoutMs);
@@ -68,7 +70,10 @@ async function buildStats({ monitorKeys = [], zabbix = null, omada = null, hikce
     stats.problems = processProblemCounts(val('problems', []));
 
     stats.devices = stats.devices || {};
-    stats.devices.hosts = countUpDown(val('hosts', []), (h) => h.available === 1);
+    // up/total/down คงความหมายเดิม (down = total - up รวม "ไม่ทราบ") — unknown/unavailable เป็นฟิลด์เสริม แยกดับจริง (2) ออกจากไม่ทราบ (0)
+    const hostList = val('hosts', []);
+    const hc = countHostStatus(hostList);
+    stats.devices.hosts = { ...countUpDown(hostList, (h) => h.available === 1), unknown: hc.unknown, unavailable: hc.unavailable };
   }
 
   if (omada) {
@@ -88,6 +93,14 @@ async function buildStats({ monitorKeys = [], zabbix = null, omada = null, hikce
   // สถานะ circuit breaker ของ HikCentral (closed | open | half_open) — ให้ Manager/ผู้ดูแลเห็น (เพิ่มเฉพาะเมื่อ service รองรับ)
   if (hikcentral && typeof hikcentral.getBreakerState === 'function') {
     stats.breakers = { hikcentral: hikcentral.getBreakerState().state };
+  }
+
+  // เวลาที่ดึงข้อมูลของแต่ละระบบสำเร็จ — ระบบที่ล้มเหลว/ไม่ได้เปิดใช้จะไม่มี key (ตัวเลขของระบบนั้นจึงไม่ควรเชื่อว่าสด)
+  const enabled = [['zabbix', zabbix], ['omada', omada], ['hikcentral', hikcentral]].filter(([, svc]) => svc);
+  if (enabled.length > 0) {
+    const at = new Date(now()).toISOString();
+    stats.refreshedAt = {};
+    for (const [key] of enabled) if (!failed.has(key)) stats.refreshedAt[key] = at;
   }
 
   if (failed.size > 0) {

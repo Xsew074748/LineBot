@@ -18,6 +18,7 @@ const DEFAULT_TIMES = ['08:00', '17:00'];
 const MAX_TIMES = 24;
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const SETTINGS_PATH = path.join(__dirname, '..', 'data', 'settings.json');
+const { describeSendError } = require('./send-error');
 const { APPROVED_ROLES } = require('../config'); // allow-list กลาง ใช้ร่วมกับ alert (services/push-targets.js)
 const MAX_PER_SECTION = 8;
 
@@ -172,13 +173,14 @@ async function run(deps, opts = {}) {
 
   let sent = 0;
   const failed = [];
-  for (const id of recipients) {
+  for (const [i, id] of recipients.entries()) {
     try {
       await deps.send(id, flex);
       sent++;
     } catch (err) {
       failed.push(id);
-      logger.error(`daily-summary: ส่งให้ ${id} ไม่สำเร็จ — ข้ามไปคนถัดไป (${err.message})`);
+      // ระบุผู้รับเป็นลำดับ (ไม่ใส่ userId ลง log) + status/body ที่ redact แล้ว เพื่อให้รู้สาเหตุจริงของ 4xx
+      logger.error(`daily-summary: ส่งให้ผู้รับ #${i + 1}/${recipients.length} ไม่สำเร็จ — ข้ามไปคนถัดไป (${describeSendError(err)})`);
     }
   }
   logger.info(`daily-summary: เสร็จ total=${summary.total} resolved=${summary.resolved.length} ongoing=${summary.ongoing.length} carry=${summary.carry.length} warnings=${summary.warnings.length} sent=${sent}/${recipients.length}`);

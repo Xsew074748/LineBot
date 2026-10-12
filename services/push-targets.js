@@ -6,6 +6,7 @@
 //   severity <  4 หรือไม่ใช่ตัวเลข → เฉพาะ ADMIN, IT_STAFF
 // PENDING, role ว่าง, พิมพ์เล็ก/พิมพ์ผิด และ role ที่ไม่รู้จักทุกแบบ ไม่ได้รับ (fail closed)
 const { APPROVED_ROLES, IT_ROLES, ALERT_BROADCAST_MIN_SEVERITY } = require('../config');
+const { describeSendError } = require('./send-error');
 
 function selectAlertRecipients(users, severity) {
   if (!Array.isArray(users)) return [];
@@ -26,13 +27,14 @@ function createAlertPusher({ listUsers, send, logger }) {
     const result = { recipients: targets.length, sent: 0, failed: 0 };
     if (!message) return result;
 
-    for (const user of targets) {
+    for (const [i, user] of targets.entries()) {
       try {
         await send(user.id, message);
         result.sent++;
       } catch (err) {
         result.failed++;
-        logger.error(`pushToUsers: userId=${user.id}`, err);
+        // ระบุผู้รับเป็นลำดับ ไม่ใส่ userId; ไม่ส่ง err ทั้งก้อนให้ logger (body อาจมีข้อมูลผู้รับ) — ใช้สรุปที่ redact แล้ว
+        logger.error(`pushToUsers: ผู้รับ #${i + 1}/${targets.length} ส่งไม่สำเร็จ (${describeSendError(err)})`);
       }
     }
     return result;

@@ -59,8 +59,8 @@ const DRIFT_NEEDLES = [
   'วิเคราะห์สถานะ Host ต่อไปนี้ บอกสาเหตุที่เป็นไปได้และวิธีแก้ไข:', 'วิเคราะห์สถานะ WiFi AP ต่อไปนี้ บอกสาเหตุที่เป็นไปได้และวิธีแก้ไข:',
   'วิเคราะห์ปัญหากล้อง CCTV ต่อไปนี้ บอกสาเหตุที่เป็นไปได้ วิธีแก้ไข และวิธีป้องกัน:', 'วิเคราะห์ภาพรวมระบบ IT ต่อไปนี้ บอกสถานการณ์ปัจจุบันและคำแนะนำ:',
   // สูตรข้อความ context (inline ใน route)
-  '`Host ทั้งหมด ${hosts.length} เครื่อง ออนไลน์ ${hosts.filter((h) => h.available === 1).length} ออฟไลน์ ${hostOffline.length}`',
-  '`: ${hostOffline.slice(0, 10).map((h) => h.name).join(\', \')}`',
+  // host: index.js เรียก buildHostContextText (services/host-status.js) — ตัวนี้ใช้ฟังก์ชันจริงตัวเดียวกัน ไม่คัดลอกสูตร
+  'const hostCtxText = buildHostContextText(hosts);',
   '`อุปกรณ์เครือข่าย: AP ${aps.length}, Switch ${switches.length}, Gateway ${gateways.length}`',
   '` — ปกติ ${devices.length - wifiOffline.length} มีปัญหา ${wifiOffline.length}`',
   '`: ${wifiOffline.slice(0, 10).map((d) => `${d.name}(${d.type})`).join(\', \')}`',
@@ -173,9 +173,7 @@ async function derive(bot, spec, state) {
     }
     case 'ctx_host': {
       const hosts = await zabbix.getHosts(50);
-      const hostOffline = hosts.filter((h) => h.available !== 1);
-      const text = `Host ทั้งหมด ${hosts.length} เครื่อง ออนไลน์ ${hosts.filter((h) => h.available === 1).length} ออฟไลน์ ${hostOffline.length}` +
-        (hostOffline.length > 0 ? `: ${hostOffline.slice(0, 10).map((h) => h.name).join(', ')}` : '');
+      const text = require('../../services/host-status').buildHostContextText(hosts);
       const r = await capture(() => ai.chat(INLINE.host(text)));
       return { ...r, trace: { via: 'zabbix.getHosts(50) → hostCtxText', context: text } };
     }
@@ -205,8 +203,10 @@ async function derive(bot, spec, state) {
         hik: hData.status === 'fulfilled' ? { cameras: hData.value } : null,
       };
       const z = allData.zabbix || {}; const h = allData.hik || {}; const o = allData.omada || {};
+      const { countHostStatus } = require('../../services/host-status');
       const text = [
-        `Zabbix: ${z.problems?.length || 0} alerts, ${z.hosts?.filter((h2) => h2.available === 1).length || 0}/${z.hosts?.length || 0} hosts online`,
+        `Zabbix: ${z.problems?.length || 0} alerts, ${z.hosts?.filter((h2) => h2.available === 1).length || 0}/${z.hosts?.length || 0} hosts online` +
+          (countHostStatus(z.hosts).unknown > 0 ? ` (ไม่ทราบสถานะ ${countHostStatus(z.hosts).unknown} เครื่อง — ไม่ได้แปลว่าดับ)` : ''),
         h.cameras ? `กล้อง: ${h.cameras.filter((c) => c.online).length}/${h.cameras.length} online` : null,
         o.aps ? `WiFi: ${o.aps.length} APs, ${o.clients?.total || 0} clients` : null,
       ].filter(Boolean).join('. ');

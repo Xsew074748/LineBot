@@ -113,7 +113,9 @@ describe('createAlertPusher() — ส่งจริงผ่าน send ปล�
     expect(sent).toEqual(['Uit', 'Uviewer']);
     expect(r).toEqual({ recipients: 3, sent: 2, failed: 1 });
     expect(logger.error).toHaveBeenCalledTimes(1);
-    expect(String(logger.error.mock.calls[0][0])).toContain('Uadmin');
+    // ระบุผู้รับเป็นลำดับ ไม่ใช่ userId (log ไม่ควรมี userId)
+    expect(String(logger.error.mock.calls[0][0])).toContain('ผู้รับ #1/');
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain('Uadmin');
     expect(JSON.stringify(logger.error.mock.calls)).not.toContain('secret-alert-text');
   });
 
@@ -155,5 +157,28 @@ describe('index.js wiring (static guard)', () => {
     const fn = src.slice(src.indexOf('async function push(userId, flexContents'), src.indexOf('// Reply with custom QR items only'));
     expect(fn.match(/lineHealth\.recordSuccess\(\); return true;/g)).toHaveLength(3);
     expect(fn.match(/lineHealth\.recordFailure\(err3\); return false;/g)).toHaveLength(1);
+  });
+});
+
+describe('createAlertPusher() — log ตอนส่งล้ม (ลำดับผู้รับ + เหตุผลที่ redact แล้ว)', () => {
+  const uid = `U${'0f1e2d3c'.repeat(4)}`;
+
+  it('log มี status และ body ที่ redact แล้ว ไม่มี userId/token และไม่ส่ง error object ดิบให้ logger', async () => {
+    const send = jest.fn(async () => {
+      throw Object.assign(new Error('400 - Bad Request'), {
+        status: 400,
+        body: `{"message":"invalid","to":"${uid}","h":"Bearer abcdefghijklmnop1234567890"}`,
+      });
+    });
+    const logger = { error: jest.fn() };
+    const push = createAlertPusher({ listUsers: () => [{ id: uid, role: 'ADMIN' }], send, logger });
+    await push('x', 3);
+    const [msg, ...rest] = logger.error.mock.calls[0];
+    expect(msg).toContain('ผู้รับ #1/1');
+    expect(msg).toContain('status=400');
+    expect(msg).toContain('invalid');
+    expect(rest).toEqual([]);
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain(uid);
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain('abcdefghijklmnop1234567890');
   });
 });

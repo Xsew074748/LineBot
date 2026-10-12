@@ -198,7 +198,33 @@ describe('daily-summary / run (dependency ปลอม)', () => {
     expect(delivered).toEqual(['U1', 'U3']);
     expect(r.sent).toBe(2);
     expect(r.failed).toEqual(['U2']);
-    expect(deps.logger.error).toHaveBeenCalledWith(expect.stringContaining('U2'));
+    // log ระบุผู้รับเป็นลำดับ (ไม่ใช่ userId) และมีเหตุผลที่ส่งไม่ถึง
+    const logged = deps.logger.error.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(logged).toContain('ผู้รับ #2/3');
+    expect(logged).toContain('user blocked bot');
+    expect(logged).not.toContain('U2');
+  });
+
+  test('ส่งล้มพร้อม err.status/err.body → log มี status และ body ที่ redact แล้ว (ไม่มี userId/token)', async () => {
+    const uid = 'U' + 'ab12cd34'.repeat(4);
+    const { deps } = mk({
+      listUsers: () => [{ id: uid, role: 'ADMIN' }, { id: 'U2', role: 'IT_STAFF' }],
+      send: jest.fn(async (id) => {
+        if (id === uid) {
+          throw Object.assign(new Error('400 - Bad Request'), {
+            status: 400,
+            body: `{"message":"invalid","to":"${uid}","t":"Bearer abcdefghijklmnop1234567890"}`,
+          });
+        }
+      }),
+    });
+    await run(deps);
+    const logged = deps.logger.error.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(logged).toContain('ผู้รับ #1/2');
+    expect(logged).toContain('status=400');
+    expect(logged).toContain('invalid');
+    expect(logged).not.toContain(uid);
+    expect(logged).not.toContain('abcdefghijklmnop1234567890');
   });
 
   test('ระบบหนึ่งดึงไม่ได้ → แจ้งในข้อความว่าข้อมูลไม่ครบ และไม่บอกว่า "ระบบปกติ"', async () => {

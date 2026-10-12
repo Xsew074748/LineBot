@@ -314,20 +314,25 @@ function buildHosts(hosts, analysis, title = 'สถานะ Host', icon = '�
   const isOnline = (h) =>
     h.available === 1 || h.online === true || h.status === 'up' || h.status === '🟢 เชื่อมต่อ' || h.status === '🟢 ออนไลน์';
 
+  // "ไม่ทราบสถานะ" = Zabbix ยังไม่ยืนยัน (available=0) ไม่ใช่ดับ — แยกออกจาก "ไม่เชื่อมต่อ"; อุปกรณ์ที่ไม่ใช่ Zabbix ไม่มี available จึงไม่เข้าข่าย
+  const isUnknown = (h) => !isOnline(h) && h.available !== undefined && h.available !== 2;
+
   const statsSrc = opts.statsFrom || hosts;
   const total   = statsSrc.length;
   const online  = statsSrc.filter(isOnline).length;
-  const offline = total - online;
-  const hc      = offline ? COLOR.red : COLOR.green;
+  const unknown = statsSrc.filter(isUnknown).length;
+  const offline = total - online - unknown;
+  const hc      = offline ? COLOR.red : (unknown ? COLOR.orange : COLOR.green);
 
   // Layout 2 บรรทัด/แถว: บน = 🟢 ชื่อ + 🤖 | ล่าง = (IP)
   const rows = hosts.slice(0, 10).map((h) => {
     const on = isOnline(h);
+    const unk = isUnknown(h);
     // Omada AP มี h.ip ตรง ๆ — Zabbix host มี IP อยู่ใน interfaces[]
     const ip = h.ip || h.interfaces?.[0]?.ip || null;
 
     const topRow = hbox([
-      txt(on ? '🟢' : '🔴', 'sm', COLOR.white, { flex: 0, gravity: 'center' }),
+      txt(on ? '🟢' : (unk ? '❓' : '🔴'), 'sm', COLOR.white, { flex: 0, gravity: 'center' }),
       txt(h.name, 'sm', '#222222', { flex: 1, weight: 'bold', wrap: true, margin: 'sm' }),
       aiRowBtn(opts.deviceType || 'host', h.name, ip),
     ]);
@@ -353,6 +358,7 @@ function buildHosts(hosts, analysis, title = 'สถานะ Host', icon = '�
         txt(`🟢 ${online} เชื่อมต่อ`, 'xs', COLOR.white, { flex: 1 }),
         txt(`🔴 ${offline} ไม่เชื่อมต่อ`, 'xs', COLOR.white, { flex: 1 }),
       ], { margin: 'xs' }),
+      ...(unknown ? [txt(`❓ ${unknown} ไม่ทราบสถานะ (Zabbix ยังไม่ยืนยัน ไม่ได้แปลว่าดับ)`, 'xs', COLOR.white, { margin: 'xs', wrap: true })] : []),
     ]),
     vbox(COLOR.white, rows, { spacing: 'xs', paddingAll: '12px' }),
     listFooter(opts.pageCmd, opts.pg, analyzeText, analysis)
@@ -1047,6 +1053,7 @@ function buildSummary(data, analysis, analyzeText = null) {
   const critProblems  = (z.problems || []).filter((p) => p.priority >= 4).length;
   const totalHosts    = z.hosts?.length || 0;
   const onlineHosts   = (z.hosts || []).filter((h2) => h2.available === 1).length;
+  const unknownHosts  = (z.hosts || []).filter((h2) => h2.available !== 1 && h2.available !== 2).length;
   const totalCams     = h.cameras?.length || 0;
   const offlineCams   = (h.cameras || []).filter((c) => !c.online).length;
   const totalAPs      = o.aps?.length || 0;
@@ -1059,6 +1066,7 @@ function buildSummary(data, analysis, analyzeText = null) {
     statCard('💻 Zabbix Host', '#F0F7FF', COLOR.blue, [
       ['ทั้งหมด', totalHosts,  '#555555'],
       ['ออนไลน์', onlineHosts, COLOR.green],
+      ...(unknownHosts ? [['ไม่ทราบสถานะ', unknownHosts, COLOR.orange]] : []),
       ['Alert',  totalProblems, totalProblems ? COLOR.red : COLOR.green],
     ]),
   ];

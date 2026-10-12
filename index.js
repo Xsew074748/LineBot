@@ -32,6 +32,8 @@ opsCrashCfg.warnings.forEach((w) => logger.warn(`ops: ${w}`));
 logger.info(`ops: crash handler ติดตั้งแล้ว (แจ้ง ADMIN ทาง LINE: ${opsCrashCfg.notify ? 'เปิด, cooldown ' + opsCrashCfg.cooldownMin + ' นาที' : 'ปิด — log อย่างเดียว'})`);
 const auth      = require('./services/auth');
 const fmt       = require('./services/formatter');
+const { buildHostContextText, countHostStatus } = require('./services/host-status');
+const { createOfflineCameraCache } = require('./services/offline-camera-cache');
 const ai        = require('./services/ai');
 const aiProviders = require('./services/ai-providers');
 const validator = require('./services/validator');
@@ -142,7 +144,8 @@ const cameraCache = { data: null, expireAt: 0 };
 
 // Offline camera background cache (ใช้กับ "กล้องดับ" — อัปเดตโดย poller)
 const OFFLINE_CAM_POLL_MS = 90_000; // 90 วินาที
-const offlineCamCache = { raw: null, refreshedAt: 0 };
+// cache ว่าง + ดึงสดล้ม → ensure() คืน null ให้คำสั่ง "กล้องดับ" ตอบว่าดึงข้อมูลไม่ได้ (ไม่ใช่ 0 ตัว) — ดู services/offline-camera-cache.js
+const offlineCamCache = createOfflineCameraCache({ fetchRaw: () => zabbix.fetchOfflineCamerasRaw(), logger });
 
 // /stats cache — กัน Manager poll ถี่ (ทุก 5 นาที) ยิง API upstream ซ้ำเกินจำเป็น
 // TTL สั้นลงเหลือ 10s เมื่อผลลัพธ์ partial (มี monitor fail/timeout) — กันแช่ค่าผิดไว้นาน
@@ -1077,9 +1080,8 @@ async function route(text, rawText, userId, replyToken) {
       if (!auth.canExecute(userId, 'host')) return reply(replyToken, fmt.buildError('คุณไม่มีสิทธิ์ใช้คำสั่งนี้'));
       if (!zabbix) return reply(replyToken, fmt.buildError('Zabbix ยังไม่เปิดใช้งาน'));
       const hosts = await zabbix.getHosts(50);
-      const hostOffline = hosts.filter((h) => h.available !== 1);
-      const hostCtxText = `Host ทั้งหมด ${hosts.length} เครื่อง ออนไลน์ ${hosts.filter((h) => h.available === 1).length} ออฟไลน์ ${hostOffline.length}` +
-        (hostOffline.length > 0 ? `: ${hostOffline.slice(0, 10).map((h) => h.name).join(', ')}` : '');
+      // ออฟไลน์ = เฉพาะที่ Zabbix ยืนยันว่าผิดปกติ (available=2); "ไม่ทราบสถานะ" แยกบอกชัดเจน ไม่นับเป็นดับ
+      const hostCtxText = buildHostContextText(hosts);
 
       // Pagination: ครั้งละ 8 — "host 2" = หน้า 2
       const pg = paginate(hosts, parsePage(text));
@@ -1137,11 +1139,10 @@ async function route(text, rawText, userId, replyToken) {
       const reqPage   = pageMatch ? parseInt(pageMatch[0], 10) : 1;
 
       // ดึงจาก background cache — ถ้ายังไม่มีให้ดึงสดครั้งแรก
-      if (!offlineCamCache.raw) await refreshOfflineCameraCache();
-      const raw         = offlineCamCache.raw || { allOffline: [], total: 0, groups: [], clockMap: {} };
-      const cacheAgeMin = offlineCamCache.refreshedAt
-        ? Math.floor((Date.now() - offlineCamCache.refreshedAt) / 60_000)
-        : null;
+      // cache ว่างและดึงสดไม่ได้ = ไม่รู้สถานะ → บอกตรงๆ ห้ามตอบเป็น "ไม่มีกล้องดับ"
+      const cached = await offlineCamCache.ensure();
+      if (!cached) return reply(replyToken, fmt.buildError('ดึงข้อมูลกล้องจาก Zabbix ไม่ได้ในขณะนี้ จึงยังไม่ทราบว่ามีกล้องดับกี่ตัว กรุณาลองใหม่อีกครั้งภายหลัง'));
+      const { raw, ageMin: cacheAgeMin } = cached;
 
       const data    = zabbix.pageOfflineCameras(reqPage, raw);
       const flexMsg = fmt.buildOfflineCameras(data, cacheAgeMin, 'วิเคราะห์กล้อง');
@@ -1264,7 +1265,8 @@ async function route(text, rawText, userId, replyToken) {
       const h = allData.hik    || {};
       const o = allData.omada  || {};
       const summaryCtxText = [
-        `Zabbix: ${z.problems?.length || 0} alerts, ${z.hosts?.filter((h2) => h2.available === 1).length || 0}/${z.hosts?.length || 0} hosts online`,
+        `Zabbix: ${z.problems?.length || 0} alerts, ${z.hosts?.filter((h2) => h2.available === 1).length || 0}/${z.hosts?.length || 0} hosts online` +
+          (countHostStatus(z.hosts).unknown > 0 ? ` (ไม่ทราบสถานะ ${countHostStatus(z.hosts).unknown} เครื่อง — ไม่ได้แปลว่าดับ)` : ''),
         h.cameras ? `กล้อง: ${h.cameras.filter((c) => c.online).length}/${h.cameras.length} online` : null,
         o.aps     ? `WiFi: ${o.aps.length} APs, ${o.clients?.total || 0} clients` : null,
       ].filter(Boolean).join('. ');
@@ -1370,22 +1372,9 @@ async function getCamerasWithCache() {
 }
 
 // ── Background Offline Camera Poller ─────────────────────────────────────────
-async function refreshOfflineCameraCache() {
-  if (!zabbix) return;
-  try {
-    const raw = await zabbix.fetchOfflineCamerasRaw();
-    offlineCamCache.raw         = raw;
-    offlineCamCache.refreshedAt = Date.now();
-    logger.info(`poller: offline cameras refreshed (total=${raw.total})`);
-  } catch (err) {
-    // timeout → warn + ใช้ cache เดิมต่อ (ไม่ reset offlineCamCache.raw)
-    const isTimeout = err.code === 'ECONNABORTED' || /timeout/i.test(err.message);
-    if (isTimeout) {
-      logger.warn(`poller: Zabbix timeout — ใช้ cache เดิมต่อ (cached total=${offlineCamCache.raw?.total ?? 'none'})`);
-    } else {
-      logger.error('poller: offline camera refresh failed', err);
-    }
-  }
+function refreshOfflineCameraCache() {
+  if (!zabbix) return Promise.resolve(false);
+  return offlineCamCache.refresh();   // ล้มเหลว (timeout/อื่นๆ) → คง cache เดิมไว้ ไม่ reset
 }
 
 // ── สร้าง summary text สำหรับส่งให้ AI วิเคราะห์ (ไม่ส่ง raw ทั้งหมด) ──────
@@ -1436,7 +1425,7 @@ async function reply(replyToken, flexContents, extraQR = []) {
     await lineClient.replyMessage(payload);
   } catch (err) {
     logger.warn(`reply: ล้มเหลวครั้งแรก (${err.message}) — retrying without quickReply`);
-    if (err.body) logger.warn(`reply: LINE error body=${err.body}`);
+    if (err.body) logger.warn(`reply: LINE error body=${redact(err.body)}`);
     try {
       await lineClient.replyMessage({
         replyToken,
@@ -1444,7 +1433,7 @@ async function reply(replyToken, flexContents, extraQR = []) {
       });
     } catch (err2) {
       logger.error('reply: ล้มเหลวทั้ง 2 ครั้ง — ส่ง text fallback', err2);
-      if (err2.body) logger.error(`reply: LINE error body=${err2.body}`);
+      if (err2.body) logger.error(`reply: LINE error body=${redact(err2.body)}`);
       // Flex ถูก reject ทั้ง 2 รอบ (เช่น payload เกิน/format ผิด) — อย่าปล่อยให้ user เงียบ
       try {
         await lineClient.replyMessage({
@@ -1468,13 +1457,13 @@ async function push(userId, flexContents, extraQR = [], label = 'push') {
     lineHealth.recordSuccess(); return true;
   } catch (err) {
     logger.warn(`push: ล้มเหลวครั้งแรก [${label}] (${err.message}) — retrying without quickReply`);
-    if (err.body) logger.warn(`push: LINE error body=${err.body}`);
+    if (err.body) logger.warn(`push: LINE error body=${redact(err.body)}`);
     try {
       await lineClient.pushMessage({ to: userId, messages: [flexMsg] });
       lineHealth.recordSuccess(); return true;
     } catch (err2) {
       logger.error(`push: ล้มเหลวทั้ง 2 ครั้ง [${label}] — ส่ง text fallback`, err2);
-      if (err2.body) logger.error(`push: LINE error body=${err2.body}`);
+      if (err2.body) logger.error(`push: LINE error body=${redact(err2.body)}`);
       try {
         await lineClient.pushMessage({ to: userId, messages: [{ type: 'text', text: 'ขออภัย เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง' }] });
         lineHealth.recordSuccess(); return true;
