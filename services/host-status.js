@@ -103,6 +103,15 @@ function countView(hosts) {
   return c;
 }
 
+// กล้อง "ออนไลน์" ไหม — ใช้จุดเดียวทุกที่: effective (กล้อง Zabbix ที่รวมผล ping) → available (Zabbix) → online (HikCentral)
+// effective = unknown ถือว่าไม่ออนไลน์ (ไม่มีสัญญาณที่เชื่อถือได้) แต่ไม่ถูกนับเป็น "ดับ" ในคำสั่ง กล้องดับ
+function isCameraUp(c) {
+  if (!c) return false;
+  if (c.effective === 'up') return true;
+  if (c.effective === 'down' || c.effective === 'unknown') return false;
+  return c.available !== undefined ? c.available === 1 : c.online === true;
+}
+
 const MAX_OFFLINE_NAMES = 10;
 
 // ข้อความบริบทที่ส่งให้ AI วิเคราะห์ (คำสั่ง "host"): ออฟไลน์ = เฉพาะที่ยืนยันว่าดับ (available=2 หรือ ping ไม่ตอบ)
@@ -127,5 +136,5 @@ function buildHostContextText(hosts) {
 
 module.exports = {
   EFFECTIVE_FRESH_SEC, classifyHost, countHostStatus,
-  classifyEffective, countEffective, viewStatus, countView, buildHostContextText,
+  classifyEffective, countEffective, viewStatus, countView, isCameraUp, buildHostContextText,
 };

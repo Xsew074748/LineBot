@@ -3,7 +3,7 @@
 // เป็น pure function รับ dependency เข้ามา (ไม่ผูกกับ index.js) เพื่อ unit test ได้ง่าย
 
 const { mergeSystems } = require('./camera-identity');
-const { countHostStatus, countEffective } = require('./host-status');
+const { countHostStatus, countEffective, isCameraUp } = require('./host-status');
 
 const DEFAULT_TIMEOUT_MS = 4000; // เผื่อ overhead ให้ตอบทันภายใน 5 วินาทีตามที่กำหนด
 
@@ -43,7 +43,7 @@ async function buildStats({ monitorKeys = [], zabbix = null, omada = null, hikce
   const jobs = {};
   if (zabbix)     jobs.problems    = withTimeout(zabbix.getProblems(200), timeoutMs);
   if (zabbix)     jobs.hosts       = withTimeout(zabbix.getHosts(200, { effective: true }), timeoutMs);
-  if (zabbix)     jobs.zCameras    = withTimeout(zabbix.getCameras(), timeoutMs);
+  if (zabbix)     jobs.zCameras    = withTimeout(zabbix.getCameras({ effective: true }), timeoutMs);
   if (omada)      jobs.aps         = withTimeout(omada.getAPs(), timeoutMs);
   if (hikcentral) jobs.hikCameras  = withTimeout(hikcentral.getCameras(1, 1000), timeoutMs);
 
@@ -94,7 +94,7 @@ async function buildStats({ monitorKeys = [], zabbix = null, omada = null, hikce
     // กล้องตัวเดียวที่อยู่ทั้ง Zabbix และ HikCentral นับครั้งเดียว (ดู services/camera-identity.js)
     const cams = mergeSystems({ zabbix: val('zCameras', []), hikcentral: val('hikCameras', []) });
     stats.devices = stats.devices || {};
-    stats.devices.cameras = countUpDown(cams, (c) => (c.available !== undefined ? c.available === 1 : c.online === true));
+    stats.devices.cameras = countUpDown(cams, isCameraUp);
   }
 
   // สถานะ circuit breaker ของ HikCentral (closed | open | half_open) — ให้ Manager/ผู้ดูแลเห็น (เพิ่มเฉพาะเมื่อ service รองรับ)

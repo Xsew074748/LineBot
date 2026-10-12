@@ -166,6 +166,30 @@ async function fetchPingItems() {
   }
 }
 
+function indexPingItems(items) {
+  const m = new Map();
+  for (const it of items || []) {
+    const k = String(it.hostid);
+    if (!m.has(k)) m.set(k, []);
+    m.get(k).push(it);
+  }
+  return m;
+}
+
+// ใส่ effective / effectiveSource / ป้าย status ให้ out (ไม่แตะ available) และ log ความขัดแย้ง agent/icmp ครั้งเดียวต่อ host
+// (ระบุลำดับ ไม่ใส่ชื่อ/รหัส/IP) — ใช้ร่วมกันทั้ง host และกล้อง
+function applyEffective(out, hostid, ordinal, itemsByHost, nowSec, what = 'host') {
+  const r = classifyEffective({ available: out.available }, itemsByHost.get(String(hostid)), nowSec);
+  out.effective = r.effective;
+  out.effectiveSource = r.source;
+  out.status = EFFECTIVE_LABEL[r.effective];
+  if (r.conflict && !conflictLogged.has(String(hostid))) {
+    conflictLogged.add(String(hostid));
+    logger.warn(`zabbix: ${what} ลำดับที่ #${ordinal}: agent กับ icmpping ให้ผลขัดกัน — ใช้ผลของ agent`);
+  }
+  return r;
+}
+
 async function getHosts(limit = 100, opts = {}) {
   const hostParams = {
     output: ['hostid', 'host', 'name', 'status'],
@@ -179,11 +203,7 @@ async function getHosts(limit = 100, opts = {}) {
     ? await Promise.all([rpc('host.get', hostParams), fetchPingItems()])
     : [await rpc('host.get', hostParams), null];
 
-  const itemsByHost = new Map();
-  for (const it of pingItems || []) {
-    if (!itemsByHost.has(String(it.hostid))) itemsByHost.set(String(it.hostid), []);
-    itemsByHost.get(String(it.hostid)).push(it);
-  }
+  const itemsByHost = indexPingItems(pingItems);
   const nowSec = Math.floor(Date.now() / 1000);
 
   const AVAIL = { 0: '❓ ไม่ทราบ', 1: '🟢 ออนไลน์', 2: '🔴 ออฟไลน์' };
@@ -198,35 +218,33 @@ async function getHosts(limit = 100, opts = {}) {
       // ส่ง interfaces ให้ adapter/MCP และ formatter ใช้อ่าน IP (แสดงต่อท้ายชื่อใน Flex)
       interfaces: h.interfaces || [],
     };
-    if (opts.effective) {
-      const r = classifyEffective({ available }, itemsByHost.get(String(h.hostid)), nowSec);
-      out.effective = r.effective;
-      out.effectiveSource = r.source;
-      out.status = EFFECTIVE_LABEL[r.effective];       // ให้ผู้ใช้ status เดิม (วิเคราะห์ ฯลฯ) เห็นสถานะที่ถูก; available ไม่ถูกแตะ
-      if (r.conflict && !conflictLogged.has(String(h.hostid))) {
-        conflictLogged.add(String(h.hostid));
-        logger.warn(`zabbix: host ลำดับที่ #${i + 1}: agent กับ icmpping ให้ผลขัดกัน — ใช้ผลของ agent`);
-      }
-    }
+    if (opts.effective) applyEffective(out, h.hostid, i + 1, itemsByHost, nowSec, 'host');
     return out;
   });
 }
 
 // ── ดึง Host ใน Group "Camera" ────────────────────────────────────────────────
-async function getCameras() {
-  const hosts = await rpc('host.get', {
+// opts.effective: ใส่ effective/effectiveSource จาก icmpping (item.get ครั้งเดียว ขนานกับ host.get) — กล้องที่ตรวจด้วย ICMP อย่างเดียว
+async function getCameras(opts = {}) {
+  const hostParams = {
     output: ['hostid', 'host', 'name', 'status'],
     selectGroups: ['name'],
     selectInterfaces: ['ip', 'available', 'main'],
     groupids: await getCameraGroupIds(),
     monitored_hosts: 1,
     sortfield: 'name',
-  });
+  };
+  const [hosts, pingItems] = opts.effective
+    ? await Promise.all([rpc('host.get', hostParams), fetchPingItems()])
+    : [await rpc('host.get', hostParams), null];
+
+  const itemsByHost = indexPingItems(pingItems);
+  const nowSec = Math.floor(Date.now() / 1000);
 
   const AVAIL = { 0: '❓ ไม่ทราบ', 1: '🟢 ออนไลน์', 2: '🔴 ออฟไลน์' };
-  return (hosts || []).map((h) => {
+  return (hosts || []).map((h, i) => {
     const available = computeAvailable(h);
-    return {
+    const out = {
       id:        h.hostid,
       name:      h.name || h.host,
       available,
@@ -234,6 +252,8 @@ async function getCameras() {
       groups:    h.groups?.map((g) => g.name).join(', ') || '',
       interfaces: h.interfaces || [],
     };
+    if (opts.effective) applyEffective(out, h.hostid, i + 1, itemsByHost, nowSec, 'กล้อง');
+    return out;
   });
 }
 
@@ -274,16 +294,24 @@ async function fetchOfflineCamerasRaw() {
   // ดึง host ทั้งหมดในกลุ่มกล้องมา filter ฝั่ง client ด้วย computeAvailable()
   // (เดิม filter server-side ด้วย host-level available='2' ซึ่ง Zabbix เวอร์ชันนี้ไม่คืนค่านั้นแล้ว
   // จึงไม่เคย match อะไรเลย — ต้องขอ 'available' ผ่าน selectInterfaces แทน)
-  const cameraHosts = await rpc('host.get', {
-    output: ['hostid', 'host', 'name', 'status'],
-    groupids: groupIds,
-    selectInterfaces: ['ip', 'available', 'main', 'type'],
-    selectInventory: ['location'],
-    monitored_hosts: 1,
-    sortfield: 'name',
-  });
+  // ดับ = agent available=2 หรือ (available=0 และ icmpping สดบอกว่าไม่ตอบ) — "ไม่ทราบ" ไม่ใช่ดับ (ดู classifyEffective)
+  const [cameraHosts, pingItems] = await Promise.all([
+    rpc('host.get', {
+      output: ['hostid', 'host', 'name', 'status'],
+      groupids: groupIds,
+      selectInterfaces: ['ip', 'available', 'main', 'type'],
+      selectInventory: ['location'],
+      monitored_hosts: 1,
+      sortfield: 'name',
+    }),
+    fetchPingItems(),
+  ]);
+  const itemsByHost = indexPingItems(pingItems);
+  const nowSec = Math.floor(Date.now() / 1000);
 
-  const allOffline = (cameraHosts || []).filter((h) => computeAvailable(h) === 2);
+  const allOffline = (cameraHosts || []).filter(
+    (h) => classifyEffective({ available: computeAvailable(h) }, itemsByHost.get(String(h.hostid)), nowSec).effective === 'down'
+  );
 
   const total = allOffline.length;
 

@@ -123,7 +123,8 @@ function loadBot(mockBase, mockCfg) {
   const src = extractTopLevel(EXTRACTED).join('\n');
   // cameraIdentity: getAllCameras ใน index.js เรียกผ่านโมดูลนี้ (dedup กล้องข้ามระบบ) — ต้องส่งเข้า sandbox ด้วย
   const cameraIdentity = require(path.join(ROOT, 'services', 'camera-identity'));
-  const ext = new Function('omada', 'zabbix', 'hikcentral', 'logger', 'cameraIdentity', `${src}\nreturn { CAMERA_SITES, getCameraSite, isCamOnline, camIp, apHasIssue, sameSubnet, cameraCache, getAllCameras, getCamerasWithCache, gatherAnalyzeContext, buildCameraAnalysisContext };`)(omada, zabbix, hikcentral, SILENT_LOGGER, cameraIdentity);
+  const { isCameraUp } = require(path.join(ROOT, 'services', 'host-status'));   // isCamOnline = isCameraUp ใน index.js
+  const ext = new Function('omada', 'zabbix', 'hikcentral', 'logger', 'cameraIdentity', 'isCameraUp', `${src}\nreturn { CAMERA_SITES, getCameraSite, isCamOnline, camIp, apHasIssue, sameSubnet, cameraCache, getAllCameras, getCamerasWithCache, gatherAnalyzeContext, buildCameraAnalysisContext };`)(omada, zabbix, hikcentral, SILENT_LOGGER, cameraIdentity, isCameraUp);
 
   const config = require(path.join(ROOT, 'config'));
   const correlate = require(path.join(ROOT, 'services', 'correlate')).correlate || require(path.join(ROOT, 'services', 'correlate'));

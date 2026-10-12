@@ -1,5 +1,5 @@
 'use strict';
-const { countView } = require('./host-status');
+const { countView, isCameraUp } = require('./host-status');
 
 // ── สีธีม ──────────────────────────────────────────────────────────────────────
 const COLOR = {
@@ -868,7 +868,7 @@ function buildCameraSites(siteStats, analyzeText = null) {
 // ── Camera Site Detail (ระดับ 2 — กล้องในไซต์ แบ่งหน้าจาก index.js) ──────────
 // cams = รายการเฉพาะหน้านี้, pg = { page, totalPages }, allSiteCams = ทั้งไซต์ (นับ header)
 function buildSiteCameras(site, cams, pg, allSiteCams) {
-  const isOn    = (c) => (c.available !== undefined ? c.available === 1 : c.online === true);
+  const isOn    = isCameraUp;
   const total   = allSiteCams.length;
   const online  = allSiteCams.filter(isOn).length;
   const offline = total - online;

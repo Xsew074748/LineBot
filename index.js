@@ -32,7 +32,7 @@ opsCrashCfg.warnings.forEach((w) => logger.warn(`ops: ${w}`));
 logger.info(`ops: crash handler ติดตั้งแล้ว (แจ้ง ADMIN ทาง LINE: ${opsCrashCfg.notify ? 'เปิด, cooldown ' + opsCrashCfg.cooldownMin + ' นาที' : 'ปิด — log อย่างเดียว'})`);
 const auth      = require('./services/auth');
 const fmt       = require('./services/formatter');
-const { buildHostContextText, countView } = require('./services/host-status');
+const { buildHostContextText, countView, isCameraUp } = require('./services/host-status');
 const { safeError } = require('./services/send-error');
 const { createOfflineCameraCache } = require('./services/offline-camera-cache');
 const ai        = require('./services/ai');
@@ -728,7 +728,7 @@ function parsePage(text) {
 const CAMERA_SITES  = ['นเรศวร', 'บ่อขยะ', 'วอแก้ว', 'สูงอายุ', 'หนองกระทิง', 'อบจ'];
 const getCameraSite = (name) => CAMERA_SITES.find((s) => String(name || '').startsWith(s)) || 'อื่นๆ';
 // รองรับทั้ง shape จาก Zabbix (available) และ HikCentral (online)
-const isCamOnline   = (c) => (c.available !== undefined ? c.available === 1 : c.online === true);
+const isCamOnline   = isCameraUp;
 
 // LINE Flex bubble จำกัด JSON 10KB — กันชนที่ 9000 bytes
 // นับ byte ไม่ใช่ char เพราะภาษาไทยกิน 3 bytes/ตัวอักษรใน UTF-8
@@ -1349,7 +1349,7 @@ async function route(text, rawText, userId, replyToken) {
 // ── ดึงกล้องจากทุก Monitor ที่ enabled ───────────────────────────────────────
 async function getAllCameras() {
   const [z, h] = await Promise.allSettled([
-    zabbix     ? zabbix.getCameras()            : Promise.resolve([]),
+    zabbix     ? zabbix.getCameras({ effective: true }) : Promise.resolve([]),
     hikcentral ? hikcentral.getCameras(1, 1000) : Promise.resolve([]), // ดึงครั้งเดียว
   ]);
   // กล้องตัวเดียวที่อยู่ทั้งสองระบบแสดง/นับครั้งเดียว (Zabbix ก่อน) — ระบบที่ดึงไม่ได้ข้ามไปเหมือนเดิม
