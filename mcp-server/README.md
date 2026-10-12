@@ -10,7 +10,7 @@ MCP Server สำหรับ IT Monitor Bot — เปิดให้ Claude De
 ติดตั้ง dependencies จาก root ของโปรเจค (ครั้งเดียว):
 
 ```bash
-cd "C:\Users\phatt\OneDrive\Desktop\Project Code\LineBot"
+cd "<PATH_TO_REPO>\LineBot"
 npm install
 ```
 
@@ -49,7 +49,7 @@ C:\Users\<username>\AppData\Roaming\Claude\claude_desktop_config.json
     "it-monitor": {
       "command": "node",
       "args": [
-        "C:\\Users\\phatt\\OneDrive\\Desktop\\Project Code\\LineBot\\mcp-server\\index.js"
+        "<PATH_TO_REPO>\\LineBot\\mcp-server\\index.js"
       ]
     }
   }
