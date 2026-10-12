@@ -33,6 +33,16 @@
 - ผลต่อผู้ใช้: ณ snapshot 2026-10-02 ผลรวมเท่าเดิม (68 + 5 = 73; จำนวนจริงเปลี่ยนได้ตามอุปกรณ์); กล้องที่อยู่ทั้งสองระบบจะนับ/แสดงครั้งเดียว (บันทึก "กล้องที่อยู่ทั้งสองระบบถูกนับซ้ำ" ในหัวข้อ ai-comparison ด้านล่าง **แก้แล้ว** — 34 เคสของ ai-comparison ไม่ได้รับผลเพราะเคสที่มีกล้องทั้งสองระบบใช้เส้นทาง alert)
 - ai-comparison/tools/bot-context.js: ส่ง cameraIdentity เข้า sandbox ของ getAllCameras และตัด CR ก่อนเทียบ drift (บน Windows index.js เป็น CRLF จึงเคยล้มทุกครั้งหลัง git checkout/stash)
 
+## สถานะ host 3 แบบ และกฎ "ห้ามบอกเกินที่รู้" (services/host-status.js, services/offline-camera-cache.js, services/send-error.js)
+- สถานะ host จาก Zabbix มี 3 แบบ ตาม available ของ main interface: **up** (1) · **unavailable** (2 = Zabbix ตรวจแล้วว่าไม่ตอบ — ดับจริง) · **unknown** (0 หรือค่าอื่น = Zabbix ยังไม่ยืนยันสถานะ)
+- **unknown ≠ down**: host ที่ตรวจด้วย ICMP อย่างเดียว (ไม่มี agent item) จะค้างที่ available=0 ถาวร ห้ามสรุปว่าดับ — นิยามกลางอยู่ที่ `classifyHost` / `countHostStatus` / `buildHostContextText` ใน services/host-status.js ห้ามนับ `available !== 1` เป็นออฟไลน์เองที่อื่น
+- ผลที่เห็นได้: การ์ด `host` แยก ❓ "ไม่ทราบสถานะ" ออกจาก 🔴; ข้อความบริบท AI นับ "ออฟไลน์" เฉพาะ available=2 และบอกว่าไม่ทราบสถานะกี่เครื่อง (ไม่ได้แปลว่าดับ)
+- **/stats**: `hosts.up/total/down` คงความหมายเดิม (down = total − up รวม unknown) เพราะ Manager คำนวณ down เอง — ห้ามเปลี่ยนความหมาย; ฟิลด์เสริม `hosts.unknown` / `hosts.unavailable` (up + unknown + unavailable = total) และ `refreshedAt.{zabbix,omada,hikcentral}` เฉพาะระบบที่ดึงสำเร็จ (ระบบที่ล้ม/ไม่เปิดใช้ไม่มี key) เพิ่มฟิลด์ได้ แต่ห้ามลบหรือเปลี่ยนความหมายของฟิลด์เดิม
+- **ยังไม่ทำ (เฟสถัดไป)**: ตัดสิน up/down จริงของ host ที่ไม่มี agent ด้วย item `icmpping` และ `adapters/zabbix.js` ที่ยังแปลง unknown เป็น `'down'` ป้อน correlate
+- **"กล้องดับ" ห้ามตอบ 0 เมื่อดึงข้อมูลไม่ได้**: cache ว่างและดึงสดล้ม (ทุกชนิด error) ต้องตอบว่าดึงข้อมูลไม่ได้ ไม่ใช่ "ไม่มีกล้องดับ"; `ensure()` ของ offline-camera-cache คืน `null` ในกรณีนี้ ส่วนรอบถัดไปที่ล้มจะคง cache เดิมไว้ (ไม่ล้าง) และข้อความแสดงอายุข้อมูล
+- **log การส่ง LINE ล้มเหลว**: ระบุผู้รับเป็นลำดับ ("ผู้รับ #N/M") ห้ามใส่ userId ลง log; ใช้ `describeSendError(err)` (message + status + body ที่ผ่าน redact ตัดไม่เกิน 300 ตัวอักษร) ห้ามส่ง error object ดิบหรือ `err.body` ดิบให้ logger — เส้นทาง daily summary และ `pushToUsers` ทำตามนี้แล้ว ส่วน `reply()`/`push()` ใน index.js redact เฉพาะ `err.body` (ยังส่ง error object ดิบให้ logger บางจุด — ยังไม่ได้เก็บ)
+- เอกสารนี้และเอกสารอื่นในรีโป (public) ห้ามมี userId, โดเมน tunnel, รหัสกล้อง, IP จริง (ดูหัวข้อ "ความปลอดภัยการเผยแพร่")
+
 ## Circuit breaker ของ HikCentral (services/circuit-breaker.js, ครอบที่ hikPost จุดเดียว)
 - ล้มเหลวติดกัน 3 ครั้ง (timeout / เครือข่ายขาด / HTTP 5xx) → เปิด 60 วินาที (คำขอล้มทันที ไม่รอ 10 วินาที) → ลอง 1 คำขอ → ปิดเมื่อสำเร็จ;
   ปรับด้วย HIKCENTRAL_BREAKER_THRESHOLD / HIKCENTRAL_BREAKER_COOLDOWN_MS (และ HIKCENTRAL_TIMEOUT_MS สำหรับ timeout ต่อคำขอ)
