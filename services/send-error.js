@@ -3,6 +3,7 @@
 // ใช้ได้กับ HTTPFetchError ของ @line/bot-sdk (มี .status / .body) และ Error ทั่วไป; ห้าม throw
 
 const redact = require('./redact');
+const { scrubNetwork } = require('./log-scrub');
 
 const MAX_BODY_CHARS = 300;
 
@@ -28,12 +29,12 @@ function describeSendError(err) {
   }
 }
 
-const IPV4 = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;
 const STACK_FRAME = /^\s+at /;
-const maskIps = (t) => String(t).replace(IPV4, '<ip>');
+// ปิด IPv4/IPv6, URL, hostname (ดู log-scrub.js) — เดิมปิดเฉพาะ IPv4
+const maskIps = scrubNetwork;
 
-// ใช้แทนการส่ง error object ดิบให้ logger — logger.error พิมพ์ err.stack ซึ่งมีข้อความ error เดิมอยู่ด้วย (อาจมี IP/userId/token)
-// คืน Error ใหม่: ข้อความ = describeSendError (redact + status/body) แล้วปิดบัง IPv4; stack = เฟรมเดิม (ยังไล่ได้ว่าพังที่ไหน)
+// ใช้แทนการส่ง error object ดิบให้ logger — logger.error พิมพ์ err.stack ซึ่งมีข้อความ error เดิมอยู่ด้วย (อาจมี IP/URL/hostname/userId/token)
+// คืน Error ใหม่: ข้อความ = describeSendError (redact + status/body) แล้วปิดบังที่อยู่เครือข่าย; stack = เฟรมเดิม (ยังไล่ได้ว่าพังที่ไหน)
 // ส่วนหัวของ stack เป็นข้อความที่ปิดบังแล้ว; ไม่แก้ error เดิม และห้าม throw
 function safeError(err) {
   try {
@@ -49,4 +50,9 @@ function safeError(err) {
   }
 }
 
-module.exports = { describeSendError, safeError };
+// ข้อความอย่างเดียว (สตริง) สำหรับต่อลงข้อความ log แทน ${err.message} — ผ่านการปิดบังแล้ว; รหัส error (ECONNREFUSED ฯลฯ) ยังอยู่
+function safeMessage(err) {
+  return safeError(err).message;
+}
+
+module.exports = { describeSendError, safeError, safeMessage };

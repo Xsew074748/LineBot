@@ -1,6 +1,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const { scrubNetwork, scrubForLog } = require('./log-scrub');
 
 // ── สร้างโฟลเดอร์ logs ถ้ายังไม่มี ───────────────────────────────────────────
 const LOG_DIR = path.join(__dirname, '..', 'logs');
@@ -13,6 +14,14 @@ const AUDIT_LOG = path.join(LOG_DIR, 'audit.log');
 // ── Format timestamp ───────────────────────────────────────────────────────────
 function timestamp() {
   return new Date().toISOString().replace('T', ' ').slice(0, 19);
+}
+
+// ── ปิดบังก่อนเขียนทุกบรรทัด (console + ไฟล์) ───────────────────────────────────
+// ที่อยู่เครือข่าย (IP/URL/hostname) + ความลับที่ redact เดิมรู้จัก — เป็นชั้นสุดท้ายกัน error ดิบของ axios/net หลุดมาลง log
+// audit ปิดเฉพาะที่อยู่เครือข่าย: audit.log ต้องระบุ userId จริงของผู้กระทำ (redact จะตัด userId ทิ้ง)
+// ตัวปิดบังพัง/ข้อความแปลก → ไม่ throw (log ต้องไม่ทำให้บอทล้ม)
+function clean(text, { keepUserId = false } = {}) {
+  try { return keepUserId ? scrubNetwork(text) : scrubForLog(text); } catch { return '[log line unreadable]'; }
 }
 
 // ── เขียนลงไฟล์ (append) ──────────────────────────────────────────────────────
@@ -29,7 +38,7 @@ const logger = {
   // Log ข้อมูลทั่วไป (INFO level)
   info(message, meta = {}) {
     const metaStr = Object.keys(meta).length ? ' ' + JSON.stringify(meta) : '';
-    const line = `[${timestamp()}] [INFO]  ${message}${metaStr}`;
+    const line = clean(`[${timestamp()}] [INFO]  ${message}${metaStr}`);
     console.log(line);
     writeToFile(INFO_LOG, line);
   },
@@ -37,7 +46,7 @@ const logger = {
   // Log ข้อผิดพลาด พร้อม stack trace ถ้ามี
   error(message, err = null) {
     const stack = err instanceof Error ? `\n  Stack: ${err.stack}` : '';
-    const line = `[${timestamp()}] [ERROR] ${message}${stack}`;
+    const line = clean(`[${timestamp()}] [ERROR] ${message}${stack}`);
     console.error(line);
     writeToFile(ERROR_LOG, line);
     writeToFile(INFO_LOG, line); // บันทึกใน info ด้วยเพื่อดู timeline ง่ายขึ้น
@@ -46,7 +55,7 @@ const logger = {
   // Log คำเตือน
   warn(message, meta = {}) {
     const metaStr = Object.keys(meta).length ? ' ' + JSON.stringify(meta) : '';
-    const line = `[${timestamp()}] [WARN]  ${message}${metaStr}`;
+    const line = clean(`[${timestamp()}] [WARN]  ${message}${metaStr}`);
     console.warn(line);
     writeToFile(INFO_LOG, line);
   },
@@ -54,14 +63,14 @@ const logger = {
   // Log ทุก API call พร้อม response time
   apiCall(service, method, durationMs, success = true) {
     const status = success ? 'OK' : 'FAIL';
-    const line = `[${timestamp()}] [API]   ${service}.${method} → ${status} (${durationMs}ms)`;
+    const line = clean(`[${timestamp()}] [API]   ${service}.${method} → ${status} (${durationMs}ms)`);
     console.log(line);
     writeToFile(INFO_LOG, line);
   },
 
   // Log ทุก AI call พร้อม token usage
   aiCall(method, inputTokens, outputTokens, durationMs) {
-    const line = `[${timestamp()}] [AI]    ${method} → in:${inputTokens} out:${outputTokens} tokens (${durationMs}ms)`;
+    const line = clean(`[${timestamp()}] [AI]    ${method} → in:${inputTokens} out:${outputTokens} tokens (${durationMs}ms)`);
     console.log(line);
     writeToFile(INFO_LOG, line);
   },
@@ -69,7 +78,7 @@ const logger = {
   // Audit log — บันทึกแยก ป้องกันการแก้ไข (append-only)
   // ใช้สำหรับคำสั่ง Admin ทุกอย่าง
   audit(userId, command, detail = '') {
-    const line = `[${timestamp()}] [AUDIT] userId=${userId} cmd="${command}" ${detail}`;
+    const line = clean(`[${timestamp()}] [AUDIT] userId=${userId} cmd="${command}" ${detail}`, { keepUserId: true });
     console.log(line);
     writeToFile(AUDIT_LOG, line);  // audit.log แยกต่างหาก
     writeToFile(INFO_LOG, line);
