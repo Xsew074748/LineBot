@@ -50,6 +50,10 @@ describe('scrubNetwork — IPv6', () => {
     expect(out).toMatch(/^connect E[A-Z]+ /);
   });
 
+  test('IPv6 ในวงเล็บเหลี่ยมพร้อมพอร์ตถูกปิดทั้งก้อน (ไม่เหลือ [ ] หรือพอร์ต)', () => {
+    expect(scrubNetwork('connect ETIMEDOUT [2001:db8::1]:443')).toBe('connect ETIMEDOUT <ip>');
+  });
+
   test('::1 ของ loopback คงไว้ และเวลา/ไฟล์:บรรทัด:คอลัมน์ ไม่ถูกมองเป็น IPv6', () => {
     expect(scrubNetwork('connect ECONNREFUSED ::1')).toBe('connect ECONNREFUSED ::1');
     const t = '    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16) 05:32:59 std::string';
@@ -71,6 +75,11 @@ describe('scrubNetwork — URL', () => {
   test('URL ท้ายประโยคไม่ดูดเครื่องหมายวรรคตอนไปด้วย', () => {
     expect(scrubNetwork('ต่อ http://zabbix.office.example/x, แล้วล้ม.')).toBe('ต่อ <url>, แล้วล้ม.');
     expect(scrubNetwork('(http://zabbix.office.example/x)')).toBe('(<url>)');
+  });
+
+  test('file:// (เฟรม stack แบบ ESM) ไม่ถูกมองเป็น URL', () => {
+    const t = '    at run (file:///app/services/x.js:12:3)';
+    expect(scrubNetwork(t)).toBe(t);
   });
 
   test('ไม่แตะ file:// และ path ใน stack', () => {
@@ -97,9 +106,9 @@ describe('scrubNetwork — hostname', () => {
   });
 
   test('ข้อความ certificate hostname mismatch', () => {
-    const out = scrubNetwork("Hostname/IP does not match certificate's altnames: Host: omada-ctrl.office. is not in the cert's altnames: DNS:other.office, DNS:third.office");
-    expect(out).not.toMatch(/omada-ctrl|other\.office|third\.office/);
-    expect(out).toContain("does not match certificate's altnames");
+    // ชื่อที่ไม่ลงท้าย .lan/.local ฯลฯ — ต้องถูกปิดด้วยกฎ Host:/DNS: เท่านั้น
+    const out = scrubNetwork("Hostname/IP does not match certificate's altnames: Host: omada-ctrl is not in the cert's altnames: DNS:other-host, DNS:third-host");
+    expect(out).toBe("Hostname/IP does not match certificate's altnames: Host: <host> is not in the cert's altnames: DNS: <host>, DNS: <host>");
   });
 
   test('ข้อความ error ทั่วไปที่ไม่มีที่อยู่ไม่ถูกแก้', () => {

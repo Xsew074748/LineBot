@@ -86,6 +86,16 @@ describe('logger scrubs every line before writing', () => {
     expect(all()).not.toContain('Stack:');
   });
 
+  test('ถ้าตัวปิดบังพังเอง บรรทัดดิบต้องไม่หลุดออกไป (เขียนข้อความแทน)', () => {
+    jest.resetModules();
+    jest.doMock('../services/log-scrub', () => ({ scrubNetwork: () => { throw new Error('x'); }, scrubForLog: () => { throw new Error('x'); } }));
+    const l = require('../services/logger');
+    l.info('connect ECONNREFUSED 10.0.0.9:80');
+    jest.dontMock('../services/log-scrub');
+    expect(all()).not.toContain('10.0.0.9');
+    expect(all()).toContain('[log line unreadable]');
+  });
+
   test('ตัวปิดบังต้องไม่ทำให้ logger throw แม้ข้อความอ่านไม่ได้', () => {
     const weird = { toString() { throw new Error('boom'); } };
     expect(require('../services/log-scrub').scrubNetwork(weird)).toBe('');

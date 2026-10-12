@@ -19,6 +19,14 @@ describe('safeError — ที่อยู่เครือข่าย', () =>
     expect(s.stack).toContain('node:net:1555:16');
   });
 
+  test('เฟรม stack ที่มี URL/IP ปนอยู่ก็ถูกปิด (เช่น stack ของ lib ที่พิมพ์ที่อยู่ในเฟรม)', () => {
+    const e = new Error('boom');
+    e.stack = 'Error: boom\n    at fetchIt (http://10.20.30.40:4100/lib.js:5:7)\n    at run (/app/services/x.js:12:3)';
+    const s = safeError(e);
+    expect(s.stack).not.toMatch(/10\.20\.30\.40|4100/);
+    expect(s.stack).toContain('/app/services/x.js:12:3');
+  });
+
   test('ENOTFOUND hostname', () => {
     const s = safeError(netError('getaddrinfo ENOTFOUND zabbix.corp.example', 'ENOTFOUND'));
     expect(s.message).toBe('getaddrinfo ENOTFOUND <host>');
