@@ -2,6 +2,7 @@
 const BaseMonitorAdapter = require('./base');
 const zabbixService     = require('../services/zabbix');
 const logger            = require('../services/logger');
+const { viewStatus }    = require('../services/host-status');
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -63,12 +64,12 @@ class ZabbixAdapter extends BaseMonitorAdapter {
 
   async getDevices() {
     try {
-      const raw = await zabbixService.getHosts(200);
+      const raw = await zabbixService.getHosts(200, { effective: true });
       return raw.map((h) => ({
         device: h.name,
         zone:   extractZone(h.name),
         type:   typeFromGroups(h.groups),
-        status: h.available === 1 ? 'up' : 'down',
+        status: viewStatus(h),   // 'up' | 'down' | 'unknown' — unknown (ยังไม่ทราบ) ไม่ถูกแปลงเป็น 'down'
         ip:     h.interfaces?.[0]?.ip || null,
       }));
     } catch (err) {

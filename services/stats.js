@@ -3,7 +3,7 @@
 // เป็น pure function รับ dependency เข้ามา (ไม่ผูกกับ index.js) เพื่อ unit test ได้ง่าย
 
 const { mergeSystems } = require('./camera-identity');
-const { countHostStatus } = require('./host-status');
+const { countHostStatus, countEffective } = require('./host-status');
 
 const DEFAULT_TIMEOUT_MS = 4000; // เผื่อ overhead ให้ตอบทันภายใน 5 วินาทีตามที่กำหนด
 
@@ -42,7 +42,7 @@ function processProblemCounts(problems) {
 async function buildStats({ monitorKeys = [], zabbix = null, omada = null, hikcentral = null, timeoutMs = DEFAULT_TIMEOUT_MS, now = Date.now } = {}) {
   const jobs = {};
   if (zabbix)     jobs.problems    = withTimeout(zabbix.getProblems(200), timeoutMs);
-  if (zabbix)     jobs.hosts       = withTimeout(zabbix.getHosts(200), timeoutMs);
+  if (zabbix)     jobs.hosts       = withTimeout(zabbix.getHosts(200, { effective: true }), timeoutMs);
   if (zabbix)     jobs.zCameras    = withTimeout(zabbix.getCameras(), timeoutMs);
   if (omada)      jobs.aps         = withTimeout(omada.getAPs(), timeoutMs);
   if (hikcentral) jobs.hikCameras  = withTimeout(hikcentral.getCameras(1, 1000), timeoutMs);
@@ -73,7 +73,14 @@ async function buildStats({ monitorKeys = [], zabbix = null, omada = null, hikce
     // up/total/down คงความหมายเดิม (down = total - up รวม "ไม่ทราบ") — unknown/unavailable เป็นฟิลด์เสริม แยกดับจริง (2) ออกจากไม่ทราบ (0)
     const hostList = val('hosts', []);
     const hc = countHostStatus(hostList);
-    stats.devices.hosts = { ...countUpDown(hostList, (h) => h.available === 1), unknown: hc.unknown, unavailable: hc.unavailable };
+    // effective* (เฟส 2): สถานะที่แท้จริงรวม ping (ICMP) — ใส่เฉพาะเมื่อทุก host มี effective (service รุ่นใหม่ + มีข้อมูล) ไม่แต่งตัวเลข
+    const withEffective = hostList.length > 0 && hostList.every((h) => h && h.effective !== undefined);
+    stats.devices.hosts = {
+      ...countUpDown(hostList, (h) => h.available === 1),
+      unknown: hc.unknown,
+      unavailable: hc.unavailable,
+      ...(withEffective ? countEffective(hostList) : {}),
+    };
   }
 
   if (omada) {

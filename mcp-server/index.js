@@ -138,7 +138,7 @@ server.tool(
       const summary = {
         timestamp: new Date().toISOString(),
         sources: [],
-        total: { up: 0, down: 0, devices: 0, problems: 0 },
+        total: { up: 0, down: 0, unknown: 0, devices: 0, problems: 0 },
       };
 
       for (const [i, result] of deviceResults.entries()) {
@@ -146,9 +146,11 @@ server.tool(
           const { name, devices } = result.value;
           const up   = devices.filter(d => d.status === 'up').length;
           const down = devices.filter(d => d.status === 'down').length;
-          summary.sources.push({ source: name, up, down, total: devices.length });
+          const unknown = devices.filter(d => d.status === 'unknown').length;   // ไม่ทราบสถานะ ≠ down
+          summary.sources.push({ source: name, up, down, unknown, total: devices.length });
           summary.total.up      += up;
           summary.total.down    += down;
+          summary.total.unknown += unknown;
           summary.total.devices += devices.length;
         } else {
           summary.sources.push({

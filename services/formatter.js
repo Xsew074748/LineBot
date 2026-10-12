@@ -1,4 +1,5 @@
 'use strict';
+const { countView } = require('./host-status');
 
 // ── สีธีม ──────────────────────────────────────────────────────────────────────
 const COLOR = {
@@ -311,11 +312,14 @@ function buildAlertWarning(items, pageInfo = null) {
 // opts.deviceType: 'host' | 'ap' — ใส่ปุ่ม 🤖 ข้างแต่ละแถว (postback analyze:...)
 // opts.pageCmd + opts.pg: แสดงปุ่ม ← Back / Next → ในการ์ด (แทน Quick Reply)
 function buildHosts(hosts, analysis, title = 'สถานะ Host', icon = '💻', analyzeText = null, opts = {}) {
-  const isOnline = (h) =>
-    h.available === 1 || h.online === true || h.status === 'up' || h.status === '🟢 เชื่อมต่อ' || h.status === '🟢 ออนไลน์';
+  // มี effective (เฟส 2: รวมผล ping) → ใช้ effective; ไม่มี → กติกาเดิมตาม available / online / status
+  const hasEff = (h) => !!h && (h.effective === 'up' || h.effective === 'down' || h.effective === 'unknown');
+  const isOnline = (h) => (hasEff(h)
+    ? h.effective === 'up'
+    : (h.available === 1 || h.online === true || h.status === 'up' || h.status === '🟢 เชื่อมต่อ' || h.status === '🟢 ออนไลน์'));
 
   // "ไม่ทราบสถานะ" = Zabbix ยังไม่ยืนยัน (available=0) ไม่ใช่ดับ — แยกออกจาก "ไม่เชื่อมต่อ"; อุปกรณ์ที่ไม่ใช่ Zabbix ไม่มี available จึงไม่เข้าข่าย
-  const isUnknown = (h) => !isOnline(h) && h.available !== undefined && h.available !== 2;
+  const isUnknown = (h) => (hasEff(h) ? h.effective === 'unknown' : (!isOnline(h) && h.available !== undefined && h.available !== 2));
 
   const statsSrc = opts.statsFrom || hosts;
   const total   = statsSrc.length;
@@ -338,7 +342,8 @@ function buildHosts(hosts, analysis, title = 'สถานะ Host', icon = '�
     ]);
 
     const contents = [topRow];
-    if (ip) contents.push(txt(`(${ip})`, 'xs', '#888888', { margin: 'xs' }));
+    const viaPing = h.effectiveSource === 'icmp' ? 'ตรวจด้วย ping' : '';
+    if (ip || viaPing) contents.push(txt([ip ? `(${ip})` : '', viaPing].filter(Boolean).join(' · '), 'xs', '#888888', { margin: 'xs' }));
 
     return vbox('#FAFAFA', contents, { margin: 'sm', paddingAll: '8px', cornerRadius: '6px' });
   });
@@ -1052,8 +1057,9 @@ function buildSummary(data, analysis, analyzeText = null) {
   const totalProblems = z.problems?.length || 0;
   const critProblems  = (z.problems || []).filter((p) => p.priority >= 4).length;
   const totalHosts    = z.hosts?.length || 0;
-  const onlineHosts   = (z.hosts || []).filter((h2) => h2.available === 1).length;
-  const unknownHosts  = (z.hosts || []).filter((h2) => h2.available !== 1 && h2.available !== 2).length;
+  const hostView      = countView(z.hosts);                 // ใช้ effective เมื่อมี ไม่งั้นตาม available
+  const onlineHosts   = hostView.up;
+  const unknownHosts  = hostView.unknown;
   const totalCams     = h.cameras?.length || 0;
   const offlineCams   = (h.cameras || []).filter((c) => !c.online).length;
   const totalAPs      = o.aps?.length || 0;

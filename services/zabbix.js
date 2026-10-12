@@ -2,6 +2,7 @@
 require('dotenv').config();
 const axios  = require('axios');
 const logger = require('./logger');
+const { classifyEffective } = require('./host-status');
 
 const BASE_URL    = process.env.ZABBIX_URL          || '';
 const API_TOKEN   = process.env.ZABBIX_API_TOKEN    || '';
@@ -135,20 +136,60 @@ async function getEventsSince(sinceSec, limit = 500) {
   });
 }
 
-async function getHosts(limit = 100) {
-  const hosts = await rpc('host.get', {
+// ── สถานะที่แท้จริง (effective) ของ host: agent (available 1/2) ชนะ; available=0 ใช้ item icmpping ที่สด ──
+// ดึง item icmpping "ทุก host" ด้วย item.get ครั้งเดียว (filter key_ ตรงตัว) ขนานกับ host.get แล้วจับคู่ตาม hostid ในโค้ด
+// item.get ล้ม → ไม่ทำให้ getHosts ล้ม: host ที่มี agent ยังตัดสินได้, host ICMP-only เป็น unknown (warn ครั้งเดียวต่อช่วงที่ล้ม)
+// ห้ามใส่ชื่อ/รหัส host ใน log (ใช้ลำดับ)
+const EFFECTIVE_LABEL = { up: '🟢 ออนไลน์', down: '🔴 ออฟไลน์', unknown: '❓ ไม่ทราบ' };
+const conflictLogged = new Set();   // hostid ที่ log ความขัดแย้ง agent/icmp ไปแล้ว
+let pingFetchFailing = false;       // true = กำลังอยู่ในช่วงที่ item.get ล้ม (warn แล้ว)
+
+function _resetEffectiveLogState() {
+  conflictLogged.clear();
+  pingFetchFailing = false;
+}
+
+async function fetchPingItems() {
+  try {
+    const items = await rpc('item.get', {
+      filter: { key_: 'icmpping' },
+      output: ['hostid', 'lastvalue', 'lastclock', 'status', 'state'],
+    });
+    pingFetchFailing = false;
+    return items || [];
+  } catch (err) {
+    if (!pingFetchFailing) {
+      pingFetchFailing = true;
+      logger.warn(`zabbix: ดึง item icmpping ไม่สำเร็จ (${err.code || 'error'}) — สถานะของ host ที่ไม่มี agent จะเป็น "ไม่ทราบ" จนกว่าจะดึงได้`);
+    }
+    return [];
+  }
+}
+
+async function getHosts(limit = 100, opts = {}) {
+  const hostParams = {
     output: ['hostid', 'host', 'name', 'status'],
     selectGroups: ['groupid', 'name'],
     selectInterfaces: ['ip', 'available', 'main'],
     monitored_hosts: 1,
     sortfield: 'name',
     limit,
-  });
+  };
+  const [hosts, pingItems] = opts.effective
+    ? await Promise.all([rpc('host.get', hostParams), fetchPingItems()])
+    : [await rpc('host.get', hostParams), null];
+
+  const itemsByHost = new Map();
+  for (const it of pingItems || []) {
+    if (!itemsByHost.has(String(it.hostid))) itemsByHost.set(String(it.hostid), []);
+    itemsByHost.get(String(it.hostid)).push(it);
+  }
+  const nowSec = Math.floor(Date.now() / 1000);
 
   const AVAIL = { 0: '❓ ไม่ทราบ', 1: '🟢 ออนไลน์', 2: '🔴 ออฟไลน์' };
-  return (hosts || []).map((h) => {
+  return (hosts || []).map((h, i) => {
     const available = computeAvailable(h);
-    return {
+    const out = {
       id:        h.hostid,
       name:      h.name || h.host,
       available,
@@ -157,6 +198,17 @@ async function getHosts(limit = 100) {
       // ส่ง interfaces ให้ adapter/MCP และ formatter ใช้อ่าน IP (แสดงต่อท้ายชื่อใน Flex)
       interfaces: h.interfaces || [],
     };
+    if (opts.effective) {
+      const r = classifyEffective({ available }, itemsByHost.get(String(h.hostid)), nowSec);
+      out.effective = r.effective;
+      out.effectiveSource = r.source;
+      out.status = EFFECTIVE_LABEL[r.effective];       // ให้ผู้ใช้ status เดิม (วิเคราะห์ ฯลฯ) เห็นสถานะที่ถูก; available ไม่ถูกแตะ
+      if (r.conflict && !conflictLogged.has(String(h.hostid))) {
+        conflictLogged.add(String(h.hostid));
+        logger.warn(`zabbix: host ลำดับที่ #${i + 1}: agent กับ icmpping ให้ผลขัดกัน — ใช้ผลของ agent`);
+      }
+    }
+    return out;
   });
 }
 
@@ -303,7 +355,7 @@ function pageOfflineCameras(page = 1, raw) {
 
 // ── ดึงข้อมูลทั้งหมดพร้อมกัน (ใช้ใน summary) ────────────────────────────────
 async function getSummary() {
-  const [problems, hosts] = await Promise.all([getProblems(20), getHosts(200)]);
+  const [problems, hosts] = await Promise.all([getProblems(20), getHosts(200, { effective: true })]);
   const cameras = hosts.filter((h) =>
     h.groups.toLowerCase().includes('camera') ||
     h.groups.toLowerCase().includes('กล้อง') ||
@@ -408,4 +460,4 @@ async function checkAuth({ url, apiToken, timeoutMs = 5000 }) {
   await rpc('hostgroup.get', { output: ['groupid'], limit: 1 }, { override: { url, apiToken, timeoutMs } });
 }
 
-module.exports = { checkAuth, getProblems, getEventsSince, getHosts, getCameras, getSummary, healthCheck, fetchOfflineCamerasRaw, pageOfflineCameras, findHosts, getHostMetrics };
+module.exports = { _resetEffectiveLogState, checkAuth, getProblems, getEventsSince, getHosts, getCameras, getSummary, healthCheck, fetchOfflineCamerasRaw, pageOfflineCameras, findHosts, getHostMetrics };

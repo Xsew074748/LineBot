@@ -66,7 +66,7 @@ const DRIFT_NEEDLES = [
   '`: ${wifiOffline.slice(0, 10).map((d) => `${d.name}(${d.type})`).join(\', \')}`',
   '`กล้องทั้งหมด ${cameras.length} เครื่อง ปกติ ${cameras.length - cameraOffline.length} มีปัญหา ${cameraOffline.length}`',
   '`: ${cameraOffline.slice(0, 5).map((c) => c.name).join(\', \')}`',
-  '`Zabbix: ${z.problems?.length || 0} alerts, ${z.hosts?.filter((h2) => h2.available === 1).length || 0}/${z.hosts?.length || 0} hosts online`',
+  '`Zabbix: ${z.problems?.length || 0} alerts, ${countView(z.hosts).up}/${z.hosts?.length || 0} hosts online`',
   '`กล้อง: ${h.cameras.filter((c) => c.online).length}/${h.cameras.length} online`',
   '`WiFi: ${o.aps.length} APs, ${o.clients?.total || 0} clients`',
   "const highGroups = groups.filter((g) => g.confidence === 'high');",
@@ -172,10 +172,10 @@ async function derive(bot, spec, state) {
       return { ...r, trace: { via: 'zabbix.fetchOfflineCamerasRaw → pageOfflineCameras → buildCameraAnalysisContext', context: text } };
     }
     case 'ctx_host': {
-      const hosts = await zabbix.getHosts(50);
+      const hosts = await zabbix.getHosts(50, { effective: true });
       const text = require('../../services/host-status').buildHostContextText(hosts);
       const r = await capture(() => ai.chat(INLINE.host(text)));
-      return { ...r, trace: { via: 'zabbix.getHosts(50) → hostCtxText', context: text } };
+      return { ...r, trace: { via: 'zabbix.getHosts(50, { effective: true }) → hostCtxText', context: text } };
     }
     case 'ctx_wifi': {
       const { aps, switches, gateways } = await omada.getAPs();
@@ -203,10 +203,10 @@ async function derive(bot, spec, state) {
         hik: hData.status === 'fulfilled' ? { cameras: hData.value } : null,
       };
       const z = allData.zabbix || {}; const h = allData.hik || {}; const o = allData.omada || {};
-      const { countHostStatus } = require('../../services/host-status');
+      const { countView } = require('../../services/host-status');
       const text = [
-        `Zabbix: ${z.problems?.length || 0} alerts, ${z.hosts?.filter((h2) => h2.available === 1).length || 0}/${z.hosts?.length || 0} hosts online` +
-          (countHostStatus(z.hosts).unknown > 0 ? ` (ไม่ทราบสถานะ ${countHostStatus(z.hosts).unknown} เครื่อง — ไม่ได้แปลว่าดับ)` : ''),
+        `Zabbix: ${z.problems?.length || 0} alerts, ${countView(z.hosts).up}/${z.hosts?.length || 0} hosts online` +
+          (countView(z.hosts).unknown > 0 ? ` (ไม่ทราบสถานะ ${countView(z.hosts).unknown} เครื่อง — ไม่ได้แปลว่าดับ)` : ''),
         h.cameras ? `กล้อง: ${h.cameras.filter((c) => c.online).length}/${h.cameras.length} online` : null,
         o.aps ? `WiFi: ${o.aps.length} APs, ${o.clients?.total || 0} clients` : null,
       ].filter(Boolean).join('. ');
