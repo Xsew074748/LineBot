@@ -53,6 +53,26 @@ function tokenMatches(given, expected) {
   return ok && typeof given === 'string' && given !== '' && typeof expected === 'string' && expected !== '';
 }
 
+// connectivity (ผล snapshot() ของ services/connectivity.js) → เก็บเฉพาะ state / since / minutes / รายระบบ (ชื่อมาตรฐาน) ที่ผ่านการกรอง
+// เป็นข้อมูลเสริม ไม่ใช่เหตุให้ตอบ 503 (บอทไม่ได้ตาย แค่มองไม่เห็นออฟฟิศ) และไม่ผ่านที่อยู่/ข้อความ error ใดๆ
+const CONN_STATES = ['ok', 'degraded', 'unreachable'];
+const CONN_SYSTEMS = ['zabbix', 'omada', 'hikcentral'];
+function safeConnectivity(c) {
+  if (!c || typeof c !== 'object' || !CONN_STATES.includes(c.state)) return null;
+  const int = (v) => (Number.isFinite(v) ? Math.max(0, Math.round(v)) : 0);
+  const out = {
+    state: c.state,
+    since: typeof c.since === 'string' && /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/.test(c.since) ? c.since : null,
+    minutes: int(c.minutes),
+    systems: {},
+  };
+  for (const name of CONN_SYSTEMS) {
+    const s = c.systems && c.systems[name];
+    if (s && typeof s === 'object') out.systems[name] = { ok: !!s.ok, lastOkAgoSec: Number.isFinite(s.lastOkAgoSec) ? Math.round(s.lastOkAgoSec) : null, failingMinutes: int(s.failingMinutes) };
+  }
+  return out;
+}
+
 const maxAgeMs = (intervalMs) => Math.max(STALE_FACTOR * intervalMs, STALE_MIN_MS);
 const secs = (ms) => Math.round(Math.max(0, ms) / 1000);
 const ageSec = (now, at) => (Number.isFinite(at) ? secs(now - at) : null);
@@ -66,7 +86,7 @@ const CHECKERS = [
 
 // input: { now, startedAt, checkers: { hikTempAlarm?, omadaTrafficAlert? } (ผล getStatus() หรือ null), line (ผล snapshot()),
 //          lineFailThreshold, lineFailWindowMin, hikBreaker? } → { ok, reasons[], body }
-function evaluate({ now, startedAt, checkers = {}, line, lineFailThreshold = DEFAULT_LINE_FAIL_THRESHOLD, lineFailWindowMin = DEFAULT_LINE_FAIL_WINDOW_MIN, hikBreaker = null }) {
+function evaluate({ now, startedAt, checkers = {}, line, lineFailThreshold = DEFAULT_LINE_FAIL_THRESHOLD, lineFailWindowMin = DEFAULT_LINE_FAIL_WINDOW_MIN, hikBreaker = null, connectivity = null }) {
   const reasons = [];
   const checkerViews = {};
 
@@ -105,6 +125,8 @@ function evaluate({ now, startedAt, checkers = {}, line, lineFailThreshold = DEF
     },
   };
   if (typeof hikBreaker === 'string' && /^[a-z_]{1,12}$/.test(hikBreaker)) body.hikcentral = { breaker: hikBreaker };
+  const conn = safeConnectivity(connectivity);
+  if (conn) body.connectivity = conn;
   return { ok: reasons.length === 0, reasons, body };
 }
 

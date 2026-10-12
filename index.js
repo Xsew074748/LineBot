@@ -34,6 +34,8 @@ const auth      = require('./services/auth');
 const fmt       = require('./services/formatter');
 const { buildHostContextText, countView, isCameraUp } = require('./services/host-status');
 const { safeError } = require('./services/send-error');
+const connectivity = require('./services/connectivity');
+const { createHealthHandler } = require('./services/health');
 const { createOfflineCameraCache } = require('./services/offline-camera-cache');
 const ai        = require('./services/ai');
 const aiProviders = require('./services/ai-providers');
@@ -58,6 +60,7 @@ const omada      = enabledMonitors.omada      ? require('./services/omada')     
 const hikcentral = enabledMonitors.hikcentral ? require('./services/hikcentral') : null;
 
 logger.info('Monitors loaded', { enabled: Object.keys(enabledMonitors) });
+connectivity.setEnabled(Object.keys(enabledMonitors));   // สถานะการเชื่อมต่อนับเฉพาะระบบที่เปิดใช้
 
 // ── LINE Client ────────────────────────────────────────────────────────────────
 const lineClient = new line.messagingApi.MessagingApiClient({
@@ -294,14 +297,12 @@ function getActiveAiProviderName() {
 }
 
 // ── /health endpoint ───────────────────────────────────────────────────────────
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    service: 'IT Monitor Bot',
-    monitorsLoaded: Object.keys(enabledMonitors),
-    aiProvider: getActiveAiProviderName(),
-  });
-});
+// HTTP status ต้องเป็น 200 เสมอ (Docker HEALTHCHECK ใช้) — connectivity เป็นข้อมูลเสริม ดู services/health.js
+app.get('/health', createHealthHandler({
+  getMonitorsLoaded: () => Object.keys(enabledMonitors),
+  getAiProvider: getActiveAiProviderName,
+  getConnectivity: () => connectivity.publicView(),
+}));
 
 // ── /health/deep — "ทำงานได้จริงไหม" สำหรับ Zabbix ภายนอก (แยกจาก /health ที่ Docker HEALTHCHECK ใช้ — ไม่เปลี่ยน) ──
 // ปิดเป็นค่าเริ่มต้น (404) จนกว่าจะตั้ง HEALTH_DEEP_TOKEN (≥ 24 ตัวอักษร) ส่งผ่าน header x-health-token เท่านั้น
@@ -319,6 +320,7 @@ app.get('/health/deep', rateLimit({ windowMs: 60_000, max: 30, standardHeaders: 
     checkers: { hikTempAlarm: hikChecker && hikChecker.getStatus(), omadaTrafficAlert: omadaChecker && omadaChecker.getStatus() },
     line: lineHealth.snapshot(),
     hikBreaker: hikcentral && typeof hikcentral.getBreakerState === 'function' ? hikcentral.getBreakerState().state : null,
+    connectivity: connectivity.snapshot(),
   }),
 }));
 
@@ -1582,6 +1584,7 @@ function runDailySummary(opts = {}) {
   return dailySummary.run({
     zabbix, omada, hikcentral,
     listUsers: auth.listUsers,
+    getConnectivity: () => connectivity.snapshot(),
     send: lineHealth.track((to, flex) => lineClient.pushMessage({ to, messages: [{ type: 'flex', altText: '📋 สรุปปัญหาประจำวัน', contents: flex }] })),
     logger,
   }, opts);

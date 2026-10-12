@@ -280,18 +280,13 @@ describe('/health เดิมและ Docker HEALTHCHECK คงเดิม', 
   const root = path.join(__dirname, '..');
   const idx = fs.readFileSync(path.join(root, 'index.js'), 'utf8').replace(/\r\n/g, '\n');
 
-  it('handler ของ /health ยังเป็นรูปเดิมทุกบรรทัด', () => {
-    const original = [
-      "app.get('/health', (req, res) => {",
-      '  res.json({',
-      "    status: 'ok',",
-      "    service: 'IT Monitor Bot',",
-      '    monitorsLoaded: Object.keys(enabledMonitors),',
-      '    aiProvider: getActiveAiProviderName(),',
-      '  });',
-      '});',
-    ].join('\n');
-    expect(idx).toContain(original);
+  // สัญญาของ /health (Docker HEALTHCHECK ใช้): ตอบ 200 เสมอ และฟิลด์เดิม 4 ตัวคงเดิม — เพิ่ม connectivity เป็นข้อมูลเสริมได้ (ดู tests/health-connectivity.test.js)
+  it('/health ผูกกับ createHealthHandler ที่ให้ฟิลด์เดิมครบ (status, service, monitorsLoaded, aiProvider) และไม่ตั้ง HTTP status เอง', () => {
+    expect(idx).toMatch(/app\.get\('\/health',\s*createHealthHandler\(\{\s*getMonitorsLoaded: \(\) => Object\.keys\(enabledMonitors\),\s*getAiProvider: getActiveAiProviderName,/);
+    const svc = fs.readFileSync(path.join(root, 'services', 'health.js'), 'utf8').replace(/\r\n/g, '\n');
+    for (const field of ["status: 'ok'", "service: 'IT Monitor Bot'", 'monitorsLoaded: getMonitorsLoaded()', 'aiProvider: getAiProvider()']) expect(svc).toContain(field);
+    expect(svc).not.toMatch(/\.status\(/);
+    expect(svc).not.toMatch(/sendStatus|statusCode/);
   });
 
   it('Dockerfile HEALTHCHECK ยังชี้ /health เดิม (ไม่ใช่ /health/deep)', () => {

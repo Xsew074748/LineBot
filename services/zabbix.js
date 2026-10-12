@@ -3,6 +3,7 @@ require('dotenv').config();
 const axios  = require('axios');
 const logger = require('./logger');
 const { classifyEffective } = require('./host-status');
+const connectivity = require('./connectivity');
 
 const BASE_URL    = process.env.ZABBIX_URL          || '';
 const API_TOKEN   = process.env.ZABBIX_API_TOKEN    || '';
@@ -38,6 +39,7 @@ async function rpc(method, params, { auth = true, override = null } = {}) {
       { headers, timeout: timeoutMs }
     );
     logger.apiCall('Zabbix', method, Date.now() - start);
+    connectivity.record('zabbix', true);
 
     if (resp.data.error) {
       throw new Error(`Zabbix API Error [${resp.data.error.code}]: ${resp.data.error.data}`);
@@ -45,6 +47,7 @@ async function rpc(method, params, { auth = true, override = null } = {}) {
     return resp.data.result;
   } catch (err) {
     logger.apiCall('Zabbix', method, Date.now() - start, false);
+    connectivity.record('zabbix', false, err);
     throw err;
   }
 }

@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const https  = require('https');
 const fs     = require('fs');
 const logger = require('./logger');
+const connectivity = require('./connectivity');
 const { createBreaker, envPositiveInt } = require('./circuit-breaker');
 
 // ── HikCentral OpenAPI (artemis) — AK/SK Signature Authentication ─────────────
@@ -106,6 +107,7 @@ async function hikPostRaw(path, body = {}, override = null) {
       ...(override?.timeoutMs ? { timeout: override.timeoutMs } : {}),
     });
     logger.apiCall('HikCentral', path, Date.now() - start);
+    connectivity.record('hikcentral', true);
 
     const data = resp.data;
     // artemis ตอบ 200 เสมอ ต้องเช็ค code ในเนื้อ response เอง ('0' = สำเร็จ)
@@ -115,6 +117,7 @@ async function hikPostRaw(path, body = {}, override = null) {
     return data?.data;
   } catch (err) {
     logger.apiCall('HikCentral', path, Date.now() - start, false);
+    connectivity.record('hikcentral', false, err);
     throw err;
   }
 }

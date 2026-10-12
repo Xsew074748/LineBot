@@ -123,9 +123,21 @@ function section(title, color, items, fmtLine) {
   return out;
 }
 
-function buildFlex(s, nowMs, label) {
+// conn = ผล snapshot() ของ services/connectivity.js (หรือ null): ไม่ใช่ ok → ใส่บรรทัดเด่นและห้ามขึ้นว่า "ระบบปกติ"
+function connectivityNotice(conn) {
+  if (!conn || !conn.state || conn.state === 'ok') return null;
+  const mins = Number.isFinite(conn.minutes) ? conn.minutes : 0;
+  const sinceMs = Date.parse(conn.since);
+  const at = Number.isFinite(sinceMs) ? ` (ตั้งแต่ ${clockTH(sinceMs)})` : '';
+  if (conn.state === 'unreachable') return `ติดต่อระบบมอนิเตอร์ไม่ได้ ${mins} นาที${at}`;
+  const names = Array.isArray(conn.failing) && conn.failing.length ? `ระบบ ${conn.failing.join(', ')}` : 'บางระบบ';
+  return `ติดต่อ${names} ไม่ได้ ${mins} นาที${at}`;
+}
+
+function buildFlex(s, nowMs, label, conn = null) {
+  const connNotice = connectivityNotice(conn);
   const hasProblem = s.total > 0 || s.carry.length > 0;
-  const color = s.warnings.length ? '#E07B00' : hasProblem ? '#DC3545' : '#28A745';
+  const color = (s.warnings.length || (connNotice && !hasProblem)) ? '#E07B00' : hasProblem ? '#DC3545' : '#28A745';
   const header = {
     type: 'box', layout: 'vertical', backgroundColor: color, paddingAll: '14px',
     contents: [
@@ -134,7 +146,11 @@ function buildFlex(s, nowMs, label) {
     ],
   };
   const body = [];
-  if (!hasProblem && !s.warnings.length) {
+  if (connNotice) {
+    body.push(t(`⚠️ ${connNotice}`, 'sm', '#DC3545', { weight: 'bold', margin: 'sm', wrap: true }));
+    body.push(t('ข้อมูลในสรุปนี้อาจไม่ครบ ตัวเลขอาจต่ำกว่าความจริง', 'xs', '#E07B00', { margin: 'xs', wrap: true }));
+  }
+  if (!hasProblem && !s.warnings.length && !connNotice) {
     body.push(t('✅ วันนี้ระบบปกติ ไม่มีปัญหา', 'md', '#28A745', { weight: 'bold' }));
     body.push(t('ระบบ monitoring ทำงานอยู่ตามปกติ', 'xs', '#888888', { margin: 'sm' }));
   } else {
@@ -144,7 +160,7 @@ function buildFlex(s, nowMs, label) {
     body.push(...section('🔴 ยังค้างอยู่', '#DC3545', s.ongoing, (i) => `• ${i.name} — ${i.detail}${i.snapshot ? ' *' : ''}`));
     body.push(...section('🕓 ค้างมาจากก่อนวันนี้', '#E07B00', s.carry, (i) => `• ${i.name} — ${i.detail}`));
     body.push(...section('✅ แก้ไขแล้ว', '#28A745', s.resolved, (i) => `• ${i.name} — ${i.detail}${i.at ? ` (แก้ ${clockTH(i.at * 1000)})` : ''}`));
-    if (!hasProblem) body.push(t('ไม่พบปัญหาจากระบบที่ดึงข้อมูลได้', 'sm', '#28A745', { margin: 'md' }));
+    if (!hasProblem && !connNotice) body.push(t('ไม่พบปัญหาจากระบบที่ดึงข้อมูลได้', 'sm', '#28A745', { margin: 'md' }));
   }
   if (s.warnings.length) {
     body.push(t('⚠️ ข้อมูลไม่ครบ — ดึงข้อมูลไม่ได้:', 'xs', '#E07B00', { weight: 'bold', margin: 'md' }));
@@ -165,7 +181,10 @@ async function run(deps, opts = {}) {
   const nowMs = (deps.now || Date.now)();
   const data = await collect(deps, nowMs);
   const summary = summarize(data);
-  const flex = buildFlex(summary, nowMs, opts.label);
+  // อ่านสถานะการเชื่อมต่อ "หลัง" ดึงข้อมูลรอบนี้เสร็จ (ผลการเรียกรอบนี้ถูกบันทึกแล้ว) — พังไม่ทำให้สรุปล้ม
+  let conn = null;
+  try { conn = deps.getConnectivity ? deps.getConnectivity() : null; } catch { conn = null; }
+  const flex = buildFlex(summary, nowMs, opts.label, conn);
 
   const recipients = opts.noSend
     ? []

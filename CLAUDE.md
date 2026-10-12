@@ -48,6 +48,15 @@
 - **log การส่ง LINE ล้มเหลว**: ระบุผู้รับเป็นลำดับ ("ผู้รับ #N/M") ห้ามใส่ userId ลง log; ใช้ `describeSendError(err)` (message + status + body ที่ผ่าน redact ตัดไม่เกิน 300 ตัวอักษร) ห้ามส่ง error object ดิบหรือ `err.body` ดิบให้ logger — เส้นทาง daily summary และ `pushToUsers` ทำตามนี้แล้ว ส่วน `reply()`/`push()` ใน index.js redact เฉพาะ `err.body` (ยังส่ง error object ดิบให้ logger บางจุด — ยังไม่ได้เก็บ)
 - เอกสารนี้และเอกสารอื่นในรีโป (public) ห้ามมี userId, โดเมน tunnel, รหัสกล้อง, IP จริง (ดูหัวข้อ "ความปลอดภัยการเผยแพร่")
 
+## สถานะการเชื่อมต่อออฟฟิศ (services/connectivity.js, services/health.js)
+- บันทึกผลการเรียก API ที่ 7 จุดเดิมข้างๆ `logger.apiCall` (zabbix.js 2 จุด, omada.js 4, hikcentral.js 2 — ผ่าน `connectivity.record`) — **ไม่เพิ่มการเรียกเครือข่ายใหม่**; รายการระบบที่เปิดใช้ตั้งใน index.js (`setEnabled`)
+- "ล้ม" = ติดต่อระบบไม่ถึงเท่านั้น (timeout/refused/unreachable/axios ไม่มี response, circuit breaker เปิด); ระบบที่ตอบกลับมาแล้ว (401/500 หรือ error ของ API เอง) = ติดต่อถึง ไม่นับ
+- state: `ok` · `degraded` (บางระบบล้ม หรือทุกระบบล้มแต่ยังไม่ถึงเกณฑ์) · `unreachable` (**ทุก**ระบบที่เปิดใช้ล้มต่อเนื่อง >= `CONNECTIVITY_UNREACHABLE_MIN` นาที ค่าเริ่มต้น 10, ช่วง 1–1440) — ระบบเดียวล้ม (จาก 2–3 ระบบ) ไม่เป็น unreachable เด็ดขาด
+- `since`/`minutes`: unreachable = ตั้งแต่ระบบ "สุดท้าย" เริ่มล้ม; degraded = ตั้งแต่ระบบที่ล้มเก่าสุด; ล้มซ้ำไม่ขยับเวลาเริ่ม, สำเร็จครั้งเดียวรีเซ็ต
+- แสดงที่: `/health` เพิ่ม `connectivity:{state,since,minutes}` (**HTTP status ต้องเป็น 200 เสมอ** — Docker HEALTHCHECK ใช้ บอทไม่ได้ตายแค่มองไม่เห็นออฟฟิศ; มีเทสต์ล็อก), `/health/deep` เพิ่ม `connectivity` รายระบบ (ไม่เป็นเหตุให้ 503), สรุปประจำวัน (บรรทัดเด่น "ติดต่อระบบมอนิเตอร์ไม่ได้ N นาที (ตั้งแต่ HH:mm)" + ห้ามขึ้นว่า "ระบบปกติ"; อ่านสถานะหลังดึงข้อมูลรอบนั้นเสร็จ)
+- ห้ามมี IP/hostname/URL/ข้อความ error ในผลลัพธ์ของ connectivity (มีเทสต์ล็อก) — มีได้แค่ชื่อระบบมาตรฐาน (zabbix/omada/hikcentral) ตัวเลข และเวลา
+- ข้อจำกัด: ระยะเวลานับด้วยนาฬิกาจริง รวมช่วงที่เครื่องหลับ (ตื่นแล้วการเรียก API ครั้งแรกจะยืนยัน/รีเซ็ตสถานะ)
+
 ## Circuit breaker ของ HikCentral (services/circuit-breaker.js, ครอบที่ hikPost จุดเดียว)
 - ล้มเหลวติดกัน 3 ครั้ง (timeout / เครือข่ายขาด / HTTP 5xx) → เปิด 60 วินาที (คำขอล้มทันที ไม่รอ 10 วินาที) → ลอง 1 คำขอ → ปิดเมื่อสำเร็จ;
   ปรับด้วย HIKCENTRAL_BREAKER_THRESHOLD / HIKCENTRAL_BREAKER_COOLDOWN_MS (และ HIKCENTRAL_TIMEOUT_MS สำหรับ timeout ต่อคำขอ)
@@ -207,3 +216,6 @@ production คือ container **netguard-itmonitor** (Manager คุม, ข้
   - ยังไม่ได้ทดสอบกับแอป LINE จริง: ack+push ของคำสั่ง AI ทั้ง 9 จุด (ทดสอบผ่านตัวดักที่ชั้น SDK), Claude/OpenAI จริง
   - TEST_CASES.md ยังไม่มีเคส ack+push, guard, timeout, retry/backoff, mock-lab
   - ข้อสังเกตที่ยังไม่สืบสาเหตุ: HikCentral /cameras timeout 10 วินาที (เกิดทุก ~5 นาทีก่อนเครื่อง reboot 2026-10-02 13:01 แต่หลัง reboot ตอบ ~480 ms ไม่ timeout เลย — ยังไม่รู้ว่าหายถาวรไหม), "กล้องดับ" ขัดกับ "กล้อง", /health รายงาน aiProvider เป็น claude แม้ไม่มี key
+
+## งานถัดไป
+- **แจ้ง ADMIN ทาง LINE เมื่อ connectivity เป็น `unreachable` เกินเกณฑ์** (แจ้งครั้งเดียวต่อเหตุ + แจ้งเมื่อกลับมา, เริ่มที่ DRYRUN, มี cooldown, ตั้งค่าผ่าน .env ตามแบบ OPS_CRASH_NOTIFY) — **ยังไม่ทำ** ตั้งใจทำหลังย้ายบอทไปเครื่องคงที่ในออฟฟิศ (ตอนนี้เครื่องเป็นโน้ตบุ๊กเคลื่อนที่ การแจ้งจะดังทุกครั้งที่ออกนอก LAN)

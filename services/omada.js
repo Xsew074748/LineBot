@@ -4,6 +4,7 @@ const fs    = require('fs');
 const https = require('https');
 const axios = require('axios');
 const logger = require('./logger');
+const connectivity = require('./connectivity');
 
 const BASE_URL     = process.env.OMADA_URL           || '';
 const OMADAC_ID     = process.env.OMADA_OMADAC_ID     || '';
@@ -62,6 +63,7 @@ async function requestToken(cfg = {}) {
       cfg.timeoutMs ? { timeout: cfg.timeoutMs } : undefined
     );
     logger.apiCall('Omada', 'authorize/token', Date.now() - start);
+    connectivity.record('omada', true);
 
     const body = resp.data;
     if (body.errorCode !== 0) throw new Error(`Omada token failed [${body.errorCode}]: ${body.msg}`);
@@ -71,6 +73,7 @@ async function requestToken(cfg = {}) {
     return { token, expiresIn };
   } catch (err) {
     logger.apiCall('Omada', 'authorize/token', Date.now() - start, false);
+    connectivity.record('omada', false, err);
     throw err;
   }
 }
@@ -104,9 +107,11 @@ async function omadaGet(path, retried = false) {
       throw new Error(`Omada API error [${body.errorCode}]: ${msg}`);
     }
     logger.apiCall('Omada', path, Date.now() - start);
+    connectivity.record('omada', true);
     return body.result;
   } catch (err) {
     logger.apiCall('Omada', path, Date.now() - start, false);
+    connectivity.record('omada', false, err);
     // token หมดอายุ/ถูก revoke เร็วกว่าที่คำนวณไว้ — ออกใหม่แล้ว retry 1 ครั้ง
     if (err.response?.status === 401 && !retried) {
       accessToken = null;
